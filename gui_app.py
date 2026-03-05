@@ -161,16 +161,31 @@ class HomeScreen(FadeFrame):
         )
         self.start_btn.grid(row=5, column=0, pady=(20, 10), padx=40, sticky="ew")
 
+        # 4-Lane Buttons
+        btn_lane_grid = ctk.CTkFrame(card, fg_color="transparent")
+        btn_lane_grid.grid(row=6, column=0, pady=(0, 40), padx=40, sticky="ew")
+        btn_lane_grid.grid_columnconfigure((0, 1), weight=1)
+
         ctk.CTkButton(
-            card,
-            text="🔴🟢  4-Lane Intersection Monitor",
-            font=("Segoe UI", 14, "bold"),
+            btn_lane_grid,
+            text="🔴🟢  4-Lane Intersection",
+            font=("Segoe UI", 12, "bold"),
             height=50,
             fg_color=BG_TERTIARY,
             border_width=1, border_color=BORDER_COLOR,
             hover_color=BORDER_COLOR,
             command=controller.show_intersection_screen
-        ).grid(row=6, column=0, pady=(0, 40), padx=40, sticky="ew")
+        ).grid(row=0, column=0, padx=(0, 5), sticky="ew")
+
+        ctk.CTkButton(
+            btn_lane_grid,
+            text="🚀  4-Lane Demo",
+            font=("Segoe UI", 12, "bold"),
+            height=50,
+            fg_color=ACCENT_BLUE,
+            hover_color="#3a86d9",
+            command=lambda: controller.show_intersection_screen(demo=True)
+        ).grid(row=0, column=1, padx=(5, 0), sticky="ew")
 
         self.update_mode()
 
@@ -595,7 +610,7 @@ class IntersectionScreen(FadeFrame):
     LANES = ["North", "South", "East", "West"]
     ICONS = {"North": "⬆", "South": "⬇", "East": "➡", "West": "⬅"}
 
-    def __init__(self, parent, controller):
+    def __init__(self, parent, controller, start_demo=False):
         super().__init__(parent, fg_color=BG_PRIMARY)
         self.controller = controller
         self.app_state  = controller.app_state
@@ -618,6 +633,10 @@ class IntersectionScreen(FadeFrame):
         self._build_header()
         self._build_grid()
         self._build_footer()
+        
+        if start_demo:
+            self.demo_var.set(True)
+            self.after(500, self._start)
 
     # ── UI builders ──────────────────────────────────────────────
     def _build_header(self):
@@ -705,6 +724,12 @@ class IntersectionScreen(FadeFrame):
             state="disabled", command=self._stop)
         self.stop_btn.pack(side="left", padx=8, pady=12)
 
+        self.demo_var = ctk.BooleanVar(value=False)
+        demo_cb = ctk.CTkCheckBox(foot, text="Run Demo (Synthetic Traffic)", 
+                                   variable=self.demo_var, font=("Segoe UI", 12, "bold"),
+                                   fg_color=ACCENT_BLUE, hover_color="#3a86d9")
+        demo_cb.pack(side="left", padx=20)
+
         self.cycle_lbl = ctk.CTkLabel(
             foot, text="Cycle: -  |  Active: -  |  Green time: -",
             font=("Segoe UI", 12), text_color=TEXT_MUTED)
@@ -725,19 +750,26 @@ class IntersectionScreen(FadeFrame):
         self.controller.show_home_screen()
 
     def _start(self):
+        is_demo = self.demo_var.get()
         loaded = {l: p for l, p in self.video_paths.items() if p}
-        if not loaded:
-            messagebox.showwarning("No Videos", "Add at least one lane video first.")
+        
+        if not is_demo and not loaded:
+            messagebox.showwarning("No Videos", "Add at least one lane video first, or enable 'Demo Mode'.")
             return
 
-        # Open VideoCapture for each loaded lane
-        for lane, path in loaded.items():
-            cap = cv2.VideoCapture(path)
-            if cap.isOpened():
-                self.caps[lane] = cap
-            else:
-                messagebox.showerror("Open Error", f"Cannot open video for {lane}:\n{path}")
-                return
+        if not is_demo:
+            # Open VideoCapture for each loaded lane
+            for lane, path in loaded.items():
+                cap = cv2.VideoCapture(path)
+                if cap.isOpened():
+                    self.caps[lane] = cap
+                else:
+                    messagebox.showerror("Open Error", f"Cannot open video for {lane}:\n{path}")
+                    return
+        else:
+            # Use all 4 lanes in demo mode
+            for lane in self.LANES:
+                self.video_paths[lane] = "DEMO"
 
         self.running = True
         self._stop_evt.clear()
@@ -823,19 +855,50 @@ class IntersectionScreen(FadeFrame):
     def _poll_frames(self):
         if not self.running:
             return
-        for lane, cap in self.caps.items():
-            if cap is None or not cap.isOpened():
-                continue
+        
+        is_demo = self.demo_var.get()
+        lanes_to_poll = self.LANES if is_demo else self.caps.keys()
+
+        for lane in lanes_to_poll:
             if lane == self.active_lane:
-                ret, frame = cap.read()
-                if not ret:
-                    # Loop video
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    ret, frame = cap.read()
-                if ret:
+                if is_demo:
+                    frame = self._generate_demo_frame(lane)
                     self._show_frame(lane, frame)
+                else:
+                    cap = self.caps.get(lane)
+                    if cap and cap.isOpened():
+                        ret, frame = cap.read()
+                        if not ret:
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                            ret, frame = cap.read()
+                        if ret:
+                            self._show_frame(lane, frame)
             # else: lane is RED — we just don't advance the video
         self.after(33, self._poll_frames)  # ~30 fps tick
+
+    def _generate_demo_frame(self, lane: str):
+        """Generates a synthetic traffic frame for demo mode."""
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        # Background: dark road appearance
+        frame[:, :] = [30, 30, 30]
+        # Road lines
+        cv2.line(frame, (320, 0), (320, 480), (200, 200, 200), 2)
+        
+        # Lane text
+        cv2.putText(frame, f"SIMULATED: {lane.upper()}", (20, 50), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        
+        # Draw some "cars" (random moving boxes)
+        t = time.time() * 2
+        for i in range(5):
+            y_pos = int((t * 100 + i * 150) % 600) - 100
+            x_pos = 180 if i % 2 == 0 else 400
+            color = [(100, 100, 250), (100, 250, 100), (250, 100, 100)][i % 3]
+            cv2.rectangle(frame, (x_pos, y_pos), (x_pos+60, y_pos+100), color, -1)
+            cv2.putText(frame, "ID:"+str(100+i), (x_pos, y_pos-5), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        return frame
 
     def _show_frame(self, lane: str, frame: np.ndarray):
         lbl = self.video_labels[lane]
@@ -888,9 +951,9 @@ class SmartTrafficApp(ctk.CTk):
         self.clear()
         ResultsScreen(self.container, self).grid(row=0, column=0, sticky="nsew")
 
-    def show_intersection_screen(self):
+    def show_intersection_screen(self, demo=False):
         self.clear()
-        IntersectionScreen(self.container, self).grid(row=0, column=0, sticky="nsew")
+        IntersectionScreen(self.container, self, start_demo=demo).grid(row=0, column=0, sticky="nsew")
 
     def clear(self):
         for w in self.container.winfo_children(): w.destroy()
