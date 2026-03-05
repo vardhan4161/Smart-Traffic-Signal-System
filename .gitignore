@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+venv/
+ENV/
+outputs/logs/*.csv
+outputs/charts/*.png
+outputs/annotated/*.jpg
+data/videos/*.mp4
+*.pt
+.DS_Store
+.pytest_cache
+*.egg-info/
+dist/
+build/

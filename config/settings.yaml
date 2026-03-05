@@ -1,0 +1,49 @@
+detection:
+  model: "yolov8n.pt"           # YOLOv8 nano - fast, good accuracy
+  confidence_threshold: 0.45
+  iou_threshold: 0.5
+  target_classes:               # COCO class IDs
+    car: 2
+    motorcycle: 3
+    bus: 5
+    truck: 7
+
+vehicle_weights:                # Density contribution per vehicle type
+  car: 1.0
+  motorcycle: 0.5
+  bus: 2.5
+  truck: 3.0
+  unknown: 1.0
+
+signal_timing:
+  t_min: 10                     # Minimum green time in seconds
+  t_max: 90                     # Maximum green time in seconds
+  k_factor: 1.5                 # Scaling factor
+  yellow_time: 3                # Fixed yellow phase
+  all_red_time: 2               # All-red clearance between phases
+  starvation_threshold: 2       # Max cycles a lane can be skipped before priority boost
+  priority_multiplier: 1.4      # Density boost for starved lanes
+
+preprocessing:
+  enable_clahe: true            # Contrast Limited Adaptive Histogram Equalization
+  clahe_clip_limit: 2.0
+  clahe_tile_size: [8, 8]
+  target_frame_size: [640, 640]
+
+simulation:
+  num_lanes: 4
+  lane_names: ["North", "South", "East", "West"]
+  default_fixed_timer: 30       # Seconds for fixed-timer baseline
+
+logging:
+  output_dir: "outputs/logs"
+  csv_filename: "session_log.csv"
+  log_level: "INFO"
+
+visualization:
+  charts_dir: "outputs/charts"
+  annotated_dir: "outputs/annotated"
+  show_live_window: true
+  save_annotated_frames: true
+  font_scale: 0.6
+  box_thickness: 2
