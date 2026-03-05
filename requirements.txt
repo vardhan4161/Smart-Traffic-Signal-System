@@ -13,3 +13,5 @@ loguru>=0.7.0
 click>=8.1.0
 rich>=13.0.0
 customtkinter>=5.2.0
+lapx>=0.5.5
+filterpy>=1.4.5

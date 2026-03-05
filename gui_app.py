@@ -15,6 +15,8 @@ from tkinter import filedialog, messagebox
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
+from datetime import datetime
+from loguru import logger
 
 # Import existing modules
 # We assume the project root is in PYTHONPATH
@@ -298,8 +300,10 @@ class ProcessingScreen(FadeFrame):
 
     def worker_thread(self):
         try:
+            self.log("Initializing AI Engine...")
             # Initialize components
             detector = VehicleDetector(self.app_state.settings)
+            self.log(f"Model: {detector.model.model_name} loaded")
             calc = DensityCalculator(self.app_state.settings)
             
             if self.app_state.mode == "demo":
@@ -340,7 +344,18 @@ class ProcessingScreen(FadeFrame):
             time.sleep(0.01)
             
         cap.release()
-        self.controller.result_queue.put({"type": "done", "results": {}})
+        # Gather final results from detector's tracking state
+        final_counts = {cls: len(ids) for cls, ids in detector.all_seen_ids.items()}
+        for cls in ["car", "motorcycle", "bus", "truck"]:
+            final_counts.setdefault(cls, 0)
+        final_density = calc.calculate(final_counts)
+        final_results = {
+            "counts": final_counts,
+            "density": final_density,
+            "frames_processed": frame_idx,
+            "total_frames": total_frames,
+        }
+        self.controller.result_queue.put({"type": "complete", "results": final_results})
 
     def run_demo_logic(self, detector, calc):
         # Fake frames for demo
@@ -367,25 +382,33 @@ class ProcessingScreen(FadeFrame):
                 "density": density
             })
             time.sleep(0.1)
-        self.controller.result_queue.put({"type": "done", "results": {}})
+        self.controller.result_queue.put({"type": "complete", "results": {
+            "counts": {"car": random.randint(8, 20), "motorcycle": random.randint(3, 10), "bus": random.randint(1, 4), "truck": random.randint(0, 2)},
+            "density": round(random.uniform(10.0, 45.0), 1),
+            "frames_processed": 50,
+            "total_frames": 50,
+        }})
 
     def poll_queue(self):
         try:
-            while True:
+            while not self.controller.result_queue.empty():
                 item = self.controller.result_queue.get_nowait()
                 if item["type"] == "update":
                     self.update_gui(item)
-                elif item["type"] == "done":
-                    # For now just go to results
-                    self.controller.show_results_screen(item["results"])
-                    return
+                elif item["type"] == "complete":
+                    self.app_state.is_processing = False
+                    self.log("✅ Analysis Complete! Loading results...")
+                    self.controller.state_results = item.get("results", {})
+                    self.after(500, lambda: self.controller.show_results_screen(item.get("results", {})))
                 elif item["type"] == "error":
-                    messagebox.showerror("Error", item["msg"])
+                    self.app_state.is_processing = False
+                    messagebox.showerror("Processing Error", item["msg"])
                     self.controller.show_home_screen()
-                    return
-        except queue.Empty:
-            pass
-        self.after(50, self.poll_queue)
+        except Exception as ex:
+            logger.error(f"poll_queue error: {ex}")
+        
+        if self.app_state.is_processing:
+            self.after(30, self.poll_queue)
 
     def toggle_pause(self):
         self.app_state.is_paused = not self.app_state.is_paused
@@ -410,9 +433,11 @@ class ProcessingScreen(FadeFrame):
         self.video_display.configure(image=ctk_img)
         self.video_display.image = ctk_img # Ref
         
-        # Update Meta
-        self.frame_lbl.configure(text=f"Frame: {data['idx']} / {data['total']}")
-        self.pbar.set(data['idx'] / data['total'])
+        # Update Meta (guard against division by zero)
+        total = data.get('total', 1) or 1
+        idx = data.get('idx', 0)
+        self.frame_lbl.configure(text=f"Frame: {idx} / {total}")
+        self.pbar.set(idx / total)
         
         # Update Counters
         c = data["counts"]
