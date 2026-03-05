@@ -31,8 +31,8 @@ The system dynamiclly calculates green time (Tg) for each lane:
 
 ## Installation
 ```bash
-git clone https://github.com/YOUR_USERNAME/smart-traffic-system
-cd smart-traffic-system
+git clone https://github.com/vardhan4161/Smart-Traffic-Signal-System
+cd Smart-Traffic-Signal-System
 pip install -r requirements.txt
 ```
 
