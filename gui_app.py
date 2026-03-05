@@ -68,7 +68,7 @@ class HomeScreen(FadeFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color=BG_PRIMARY)
         self.controller = controller
-        self.state = controller.state
+        self.app_state = controller.app_state
         
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -139,12 +139,12 @@ class HomeScreen(FadeFrame):
         
         # Sliders
         ctk.CTkLabel(self.adv_content, text="Confidence Threshold:", font=("Segoe UI", 11)).grid(row=0, column=0, padx=10, pady=(10, 0), sticky="w")
-        self.conf_slider = ctk.CTkSlider(self.adv_content, from_=0.1, to_=0.9, number_of_steps=80)
+        self.conf_slider = ctk.CTkSlider(self.adv_content, from_=0.1, to=0.9, number_of_steps=80)
         self.conf_slider.set(0.45)
         self.conf_slider.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="ew")
 
         ctk.CTkLabel(self.adv_content, text="K Factor:", font=("Segoe UI", 11)).grid(row=0, column=1, padx=10, pady=(10, 0), sticky="w")
-        self.k_slider = ctk.CTkSlider(self.adv_content, from_=0.5, to_=3.0, number_of_steps=25)
+        self.k_slider = ctk.CTkSlider(self.adv_content, from_=0.5, to=3.0, number_of_steps=25)
         self.k_slider.set(1.5)
         self.k_slider.grid(row=1, column=1, padx=10, pady=(0, 10), sticky="ew")
 
@@ -174,7 +174,7 @@ class HomeScreen(FadeFrame):
     def browse_video(self):
         path = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4 *.avi *.mov *.mkv")])
         if path:
-            self.state.video_path = path
+            self.app_state.video_path = path
             self.show_video_meta(path)
             self.validate_start()
 
@@ -201,11 +201,11 @@ class HomeScreen(FadeFrame):
         cap.release()
 
     def update_mode(self):
-        self.state.mode = self.mode_var.get()
+        self.app_state.mode = self.mode_var.get()
         self.validate_start()
 
     def validate_start(self):
-        if self.state.mode == "demo" or self.state.video_path:
+        if self.app_state.mode == "demo" or self.app_state.video_path:
             self.start_btn.configure(state="normal")
         else:
             self.start_btn.configure(state="disabled")
@@ -217,7 +217,7 @@ class ProcessingScreen(FadeFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color=BG_PRIMARY)
         self.controller = controller
-        self.state = controller.state
+        self.app_state = controller.app_state
         
         self.grid_columnconfigure(0, weight=6) # Video
         self.grid_columnconfigure(1, weight=4) # Stats
@@ -291,18 +291,18 @@ class ProcessingScreen(FadeFrame):
         self.log_area.see("end")
 
     def start_processing(self):
-        self.state.is_processing = True
-        self.state.stop_event.clear()
+        self.app_state.is_processing = True
+        self.app_state.stop_event.clear()
         threading.Thread(target=self.worker_thread, daemon=True).start()
         self.poll_queue()
 
     def worker_thread(self):
         try:
             # Initialize components
-            detector = VehicleDetector(self.state.settings)
-            calc = DensityCalculator(self.state.settings)
+            detector = VehicleDetector(self.app_state.settings)
+            calc = DensityCalculator(self.app_state.settings)
             
-            if self.state.mode == "demo":
+            if self.app_state.mode == "demo":
                 self.run_demo_logic(detector, calc)
             else:
                 self.run_video_logic(detector, calc)
@@ -310,11 +310,11 @@ class ProcessingScreen(FadeFrame):
             self.controller.result_queue.put({"type": "error", "msg": str(e)})
 
     def run_video_logic(self, detector, calc):
-        cap = cv2.VideoCapture(self.state.video_path)
+        cap = cv2.VideoCapture(self.app_state.video_path)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
         frame_idx = 0
-        while cap.isOpened() and not self.state.stop_event.is_set():
+        while cap.isOpened() and not self.app_state.stop_event.is_set():
             ret, frame = cap.read()
             if not ret: break
             
@@ -345,7 +345,7 @@ class ProcessingScreen(FadeFrame):
     def run_demo_logic(self, detector, calc):
         # Fake frames for demo
         for i in range(50):
-            if self.state.stop_event.is_set(): break
+            if self.app_state.stop_event.is_set(): break
             counts = {
                 "car": random.randint(5, 20),
                 "motorcycle": random.randint(2, 10),
@@ -388,16 +388,16 @@ class ProcessingScreen(FadeFrame):
         self.after(50, self.poll_queue)
 
     def toggle_pause(self):
-        self.state.is_paused = not self.state.is_paused
-        self.pause_btn.configure(text="▶ Resume" if self.state.is_paused else "⏸ Pause")
-        self.log("Analysis Paused" if self.state.is_paused else "Analysis Resumed")
+        self.app_state.is_paused = not self.app_state.is_paused
+        self.pause_btn.configure(text="▶ Resume" if self.app_state.is_paused else "⏸ Pause")
+        self.log("Analysis Paused" if self.app_state.is_paused else "Analysis Resumed")
 
     def stop_processing(self):
-        self.state.stop_event.set()
+        self.app_state.stop_event.set()
         self.log("Stop requested. Finalizing partial results...")
 
     def update_gui(self, data):
-        if self.state.is_paused: return
+        if self.app_state.is_paused: return
         # Update frame
         img = Image.fromarray(cv2.cvtColor(data["frame"], cv2.COLOR_BGR2RGB))
         # Maintain aspect ratio
@@ -459,7 +459,7 @@ class ResultsScreen(FadeFrame):
 
     def setup_video_playback(self):
         tab = self.tabs.tab("VIDEO")
-        if self.controller.state.mode == "demo":
+        if self.controller.app_state.mode == "demo":
             ctk.CTkLabel(tab, text="Demo Mode — No video input recorded", font=("Segoe UI", 16)).pack(expand=True)
         else:
             ctk.CTkLabel(tab, text="Video Playback (Annotated Output)", font=("Segoe UI", 16)).pack(pady=20)
@@ -531,7 +531,7 @@ class SmartTrafficApp(ctk.CTk):
         self.minsize(1200, 750)
         self.configure(fg_color=BG_PRIMARY)
         
-        self.state = AppState()
+        self.app_state = AppState()
         self.load_default_settings()
         self.result_queue = queue.Queue()
         
@@ -545,9 +545,9 @@ class SmartTrafficApp(ctk.CTk):
     def load_default_settings(self):
         try:
             with open("config/settings.yaml", "r") as f:
-                self.state.settings = yaml.safe_load(f)
+                self.app_state.settings = yaml.safe_load(f)
         except:
-            self.state.settings = {"detection": {}, "signal_timing": {}}
+            self.app_state.settings = {"detection": {}, "signal_timing": {}}
 
     def show_home_screen(self):
         self.clear()
