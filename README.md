@@ -72,6 +72,12 @@ Monitor signal states and traffic density in real-time:
 $env:PYTHONPATH = "."; py main.py dashboard
 ```
 
+### GUI Application (Recommended)
+```bash
+$env:PYTHONPATH = "."; py gui_app.py
+```
+Opens the full graphical interface for video analysis and performance benchmarking.
+
 ### Benchmark Comparison
 Compare adaptive performance metrics against fixed-timer baselines:
 ```bash
