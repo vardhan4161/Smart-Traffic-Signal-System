@@ -63,6 +63,36 @@ class VehicleDetector:
             logger.error(f"Detection error: {e}")
             return []
 
+    def annotate(self, frame: np.ndarray, detections: List[Dict[str, Any]]) -> np.ndarray:
+        """Draw bounding boxes and labels on the frame."""
+        annotated_frame = frame.copy()
+        for det in detections:
+            x1, y1, x2, y2 = det["bbox"]
+            label = f"{det['class_name']} {det['confidence']:.2f}"
+            
+            # Color mapping
+            colors = {
+                "car": (255, 0, 0),        # Blue
+                "motorcycle": (0, 255, 255), # Yellow
+                "bus": (0, 255, 0),        # Green
+                "truck": (0, 0, 255)       # Red
+            }
+            color = colors.get(det["class_name"], (255, 255, 255))
+            
+            # Draw box
+            cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+            
+            # Draw label
+            cv2.putText(
+                annotated_frame, label, (int(x1), int(y1) - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2
+            )
+        return annotated_frame
+
+    def count_vehicles(self, detections: List[Dict[str, Any]]) -> Dict[str, int]:
+        """Alias for count_by_type for GUI compatibility."""
+        return self.count_by_type(detections)
+
     def count_by_type(self, detections: List[Dict[str, Any]]) -> Dict[str, int]:
         """Convert list of detections to counts per vehicle type."""
         counts = {name: 0 for name in self.target_classes.keys()}
