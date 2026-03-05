@@ -1,12 +1,27 @@
 detection:
-  model: "yolov8n.pt"           # YOLOv8 nano - fast, good accuracy
-  confidence_threshold: 0.45
-  iou_threshold: 0.5
-  target_classes:               # COCO class IDs
+  model_primary: "yolov8s.pt"       # Small model — best accuracy/speed balance
+  model_fallback: "yolov8n.pt"      # Fallback if s not available
+  confidence_threshold: 0.25        # Lower = catch more vehicles (was 0.45)
+  iou_threshold: 0.45               # Slightly lower to catch adjacent vehicles
+  input_size: 640                   # Standard YOLO input
+  target_classes:
     car: 2
     motorcycle: 3
     bus: 5
     truck: 7
+
+tracking:
+  enabled: true
+  tracker: "bytetrack"              # Best tracker for traffic scenarios
+  min_hits: 2                       # Track must appear in 2 frames to count
+  max_age: 15                       # Track kept alive for 15 frames after disappearing
+  min_iou: 0.3
+
+counting:
+  method: "peak_window"             # Use peak count across sliding window
+  window_frames: 30                 # Look at 30-frame windows (~1 second at 30fps)
+  use_unique_ids: true              # Count unique track IDs not raw detections
+  sample_every_n_frames: 3         # Process every 3rd frame for speed
 
 vehicle_weights:                # Density contribution per vehicle type
   car: 1.0
