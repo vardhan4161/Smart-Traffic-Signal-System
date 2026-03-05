@@ -11,6 +11,10 @@ class DensityCalculator:
         self.t_max = timing_config.get("t_max", 90)
         self.k_factor = timing_config.get("k_factor", 1.5)
 
+    def calculate(self, vehicle_counts: dict) -> float:
+        """Alias for calculate_weighted_density for GUI compatibility."""
+        return self.calculate_weighted_density(vehicle_counts)
+
     def calculate_weighted_density(self, vehicle_counts: dict) -> float:
         """Calculate total weighted density score for a lane."""
         density = 0.0
