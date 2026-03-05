@@ -103,6 +103,7 @@ def simulate(mode, north, south, east, west):
         lane_counts = {}
         
         for lane_name, video_path in lane_videos.items():
+            video_path = os.path.abspath(video_path)
             if not os.path.exists(video_path):
                 console.print(f"[red]⚠ File not found: {video_path}[/]")
                 continue

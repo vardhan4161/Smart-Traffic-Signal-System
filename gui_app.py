@@ -150,7 +150,6 @@ class HomeScreen(FadeFrame):
         self.k_slider.set(1.5)
         self.k_slider.grid(row=1, column=1, padx=10, pady=(0, 10), sticky="ew")
 
-        # Start Button
         self.start_btn = ctk.CTkButton(
             card, 
             text="▶  START ANALYSIS", 
@@ -160,7 +159,18 @@ class HomeScreen(FadeFrame):
             state="disabled",
             command=self.on_start
         )
-        self.start_btn.grid(row=5, column=0, pady=(20, 40), padx=40, sticky="ew")
+        self.start_btn.grid(row=5, column=0, pady=(20, 10), padx=40, sticky="ew")
+
+        ctk.CTkButton(
+            card,
+            text="🔴🟢  4-Lane Intersection Monitor",
+            font=("Segoe UI", 14, "bold"),
+            height=50,
+            fg_color=BG_TERTIARY,
+            border_width=1, border_color=BORDER_COLOR,
+            hover_color=BORDER_COLOR,
+            command=controller.show_intersection_screen
+        ).grid(row=6, column=0, pady=(0, 40), padx=40, sticky="ew")
 
         self.update_mode()
 
@@ -570,6 +580,274 @@ class ResultsScreen(FadeFrame):
         canvas.draw()
         canvas.get_tk_widget().pack(fill="both", expand=True, padx=20, pady=20)
 
+# ─────────────────────────────────────────────────────────────────
+# 4-LANE INTERSECTION MONITOR
+# ─────────────────────────────────────────────────────────────────
+class IntersectionScreen(FadeFrame):
+    """
+    4-panel intersection view:
+    • 2×2 grid of lane video feeds (North, South, East, West)
+    • Each panel shows live vehicle count + traffic-light indicator
+    • Green lane → video plays  |  Red lane → video freezes
+    • Signal rotates adaptively every cycle based on density
+    """
+
+    LANES = ["North", "South", "East", "West"]
+    ICONS = {"North": "⬆", "South": "⬇", "East": "➡", "West": "⬅"}
+
+    def __init__(self, parent, controller):
+        super().__init__(parent, fg_color=BG_PRIMARY)
+        self.controller = controller
+        self.app_state  = controller.app_state
+
+        # Lane state
+        self.video_paths: Dict[str, Optional[str]] = {l: None for l in self.LANES}
+        self.caps: Dict[str, Optional[cv2.VideoCapture]] = {l: None for l in self.LANES}
+        self.ctk_images: Dict[str, Any] = {}
+        self.video_labels: Dict[str, ctk.CTkLabel] = {}
+        self.signal_dots: Dict[str, ctk.CTkLabel] = {}
+        self.count_labels: Dict[str, ctk.CTkLabel] = {}
+        self.green_time_labels: Dict[str, ctk.CTkLabel] = {}
+        self.densities: Dict[str, float] = {l: 0.0 for l in self.LANES}
+        self.active_lane: Optional[str] = None   # which lane is currently GREEN
+        self.running = False
+        self.cycle_thread = None
+        self._stop_evt = threading.Event()
+
+        # Build UI
+        self._build_header()
+        self._build_grid()
+        self._build_footer()
+
+    # ── UI builders ──────────────────────────────────────────────
+    def _build_header(self):
+        hdr = ctk.CTkFrame(self, fg_color=BG_SECONDARY, corner_radius=0, height=60)
+        hdr.pack(fill="x")
+        ctk.CTkLabel(hdr, text="🔴🟢  4-Lane Intersection Monitor",
+                     font=("Segoe UI", 18, "bold")).pack(side="left", padx=20, pady=10)
+        ctk.CTkButton(hdr, text="✕ Back", width=80,
+                      fg_color=BG_TERTIARY, hover_color=BORDER_COLOR,
+                      command=self._go_home).pack(side="right", padx=20, pady=12)
+        ctk.CTkLabel(hdr, text="Green lane plays · Red lane pauses · Adaptive cycle",
+                     font=("Segoe UI", 11), text_color=TEXT_MUTED).pack(side="right", padx=5)
+
+    def _build_grid(self):
+        grid = ctk.CTkFrame(self, fg_color=BG_PRIMARY)
+        grid.pack(fill="both", expand=True, padx=10, pady=10)
+        grid.grid_columnconfigure((0, 1), weight=1)
+        grid.grid_rowconfigure((0, 1), weight=1)
+
+        positions = [("North", 0, 0), ("South", 0, 1),
+                     ("East",  1, 0), ("West",  1, 1)]
+        for lane, row, col in positions:
+            self._build_lane_card(grid, lane, row, col)
+
+    def _build_lane_card(self, parent, lane: str, row: int, col: int):
+        card = ctk.CTkFrame(parent, fg_color=BG_SECONDARY,
+                            corner_radius=12, border_width=2, border_color=BORDER_COLOR)
+        card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
+        card.grid_rowconfigure(1, weight=1)
+        card.grid_columnconfigure(0, weight=1)
+
+        # Top bar
+        top = ctk.CTkFrame(card, fg_color="transparent", height=36)
+        top.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
+
+        ctk.CTkLabel(top, text=f"{self.ICONS[lane]} {lane}",
+                     font=("Segoe UI", 13, "bold")).pack(side="left")
+
+        # DOT: red by default
+        dot = ctk.CTkLabel(top, text="🔴 RED",
+                           font=("Segoe UI", 11, "bold"), text_color=ACCENT_RED)
+        dot.pack(side="right")
+        self.signal_dots[lane] = dot
+
+        # Browse button (small)
+        ctk.CTkButton(top, text="📂", width=30, height=24,
+                      fg_color=BG_TERTIARY, hover_color=BORDER_COLOR,
+                      command=lambda l=lane: self._browse(l)).pack(side="right", padx=4)
+
+        # Video canvas
+        vid = ctk.CTkLabel(card, text="Click 📂 to add video",
+                           fg_color="black", text_color=TEXT_MUTED)
+        vid.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
+        self.video_labels[lane] = vid
+
+        # Bottom stats bar
+        bot = ctk.CTkFrame(card, fg_color=BG_TERTIARY, corner_radius=8, height=30)
+        bot.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 8))
+
+        cnt_lbl = ctk.CTkLabel(bot, text="Vehicles: --",
+                               font=("Consolas", 11), text_color=TEXT_MUTED)
+        cnt_lbl.pack(side="left", padx=8)
+        self.count_labels[lane] = cnt_lbl
+
+        gt_lbl = ctk.CTkLabel(bot, text="Green: --s",
+                              font=("Consolas", 11), text_color=ACCENT_GREEN)
+        gt_lbl.pack(side="right", padx=8)
+        self.green_time_labels[lane] = gt_lbl
+
+    def _build_footer(self):
+        foot = ctk.CTkFrame(self, fg_color=BG_SECONDARY, corner_radius=0, height=60)
+        foot.pack(fill="x", side="bottom")
+
+        self.start_btn = ctk.CTkButton(
+            foot, text="▶  START INTERSECTION",
+            font=("Segoe UI", 14, "bold"), width=200,
+            fg_color=ACCENT_GREEN, hover_color="#2e9040",
+            command=self._start)
+        self.start_btn.pack(side="left", padx=20, pady=12)
+
+        self.stop_btn = ctk.CTkButton(
+            foot, text="⏹  STOP",
+            font=("Segoe UI", 12), width=100,
+            fg_color=ACCENT_RED, hover_color="#c0392b",
+            state="disabled", command=self._stop)
+        self.stop_btn.pack(side="left", padx=8, pady=12)
+
+        self.cycle_lbl = ctk.CTkLabel(
+            foot, text="Cycle: -  |  Active: -  |  Green time: -",
+            font=("Segoe UI", 12), text_color=TEXT_MUTED)
+        self.cycle_lbl.pack(side="right", padx=20)
+
+    # ── Actions ──────────────────────────────────────────────────
+    def _browse(self, lane: str):
+        path = filedialog.askopenfilename(
+            title=f"Select video for {lane} lane",
+            filetypes=[("Video files", "*.mp4 *.avi *.mov *.mkv")])
+        if path:
+            self.video_paths[lane] = path
+            self.video_labels[lane].configure(
+                text=f"✅ {os.path.basename(path)}", text_color=ACCENT_GREEN)
+
+    def _go_home(self):
+        self._stop()
+        self.controller.show_home_screen()
+
+    def _start(self):
+        loaded = {l: p for l, p in self.video_paths.items() if p}
+        if not loaded:
+            messagebox.showwarning("No Videos", "Add at least one lane video first.")
+            return
+
+        # Open VideoCapture for each loaded lane
+        for lane, path in loaded.items():
+            cap = cv2.VideoCapture(path)
+            if cap.isOpened():
+                self.caps[lane] = cap
+            else:
+                messagebox.showerror("Open Error", f"Cannot open video for {lane}:\n{path}")
+                return
+
+        self.running = True
+        self._stop_evt.clear()
+        self.start_btn.configure(state="disabled")
+        self.stop_btn.configure(state="normal")
+
+        # Start the signal cycle thread
+        self.cycle_thread = threading.Thread(target=self._cycle_loop, daemon=True)
+        self.cycle_thread.start()
+
+        # Start frame polling
+        self._poll_frames()
+
+    def _stop(self):
+        self.running = False
+        self._stop_evt.set()
+        for cap in self.caps.values():
+            if cap:
+                cap.release()
+        self.caps = {l: None for l in self.LANES}
+        self.active_lane = None
+        # Reset dots
+        for lane in self.LANES:
+            self._set_signal(lane, False)
+        if winfo_exists := getattr(self, "start_btn", None):
+            self.start_btn.configure(state="normal")
+            self.stop_btn.configure(state="disabled")
+
+    def _set_signal(self, lane: str, is_green: bool):
+        """Update signal dot color for a lane."""
+        if is_green:
+            self.signal_dots[lane].configure(text="🟢 GREEN", text_color=ACCENT_GREEN)
+        else:
+            self.signal_dots[lane].configure(text="🔴 RED",   text_color=ACCENT_RED)
+
+    # ── Signal Cycle Thread ─────────────────────────────────────
+    def _cycle_loop(self):
+        """Runs in a background thread. Decides which lane gets green."""
+        config = self.app_state.settings
+        from src.traffic.signal_controller import SignalController
+        from src.traffic.density_calculator import DensityCalculator
+        sig_ctrl = SignalController(config)
+        calc     = DensityCalculator(config)
+        cycle_num = 0
+
+        loaded_lanes = [l for l, p in self.video_paths.items() if p]
+
+        while not self._stop_evt.is_set():
+            cycle_num += 1
+
+            # Use current densities (updated by _poll_frames via vehicle counting)
+            plan = sig_ctrl.compute_signal_plan({
+                l: self.densities.get(l, 0.0) for l in loaded_lanes
+            })
+            order = sig_ctrl.priority_order(plan)
+
+            for lane in order:
+                if self._stop_evt.is_set():
+                    return
+
+                green_time = plan[lane]["green_time"]
+                self.active_lane = lane
+
+                # Update UI signals
+                self.after(0, lambda l=lane, gt=green_time, c=cycle_num: (
+                    [self._set_signal(ll, ll == l) for ll in loaded_lanes],
+                    self.cycle_lbl.configure(
+                        text=f"Cycle: {c}  |  Active: {l}  |  Green time: {gt:.0f}s"),
+                    self.green_time_labels[l].configure(text=f"Green: {gt:.0f}s")))
+
+                # Sleep for green_time + yellow flash
+                elapsed = 0.0
+                while elapsed < green_time and not self._stop_evt.is_set():
+                    time.sleep(0.1)
+                    elapsed += 0.1
+
+                # Yellow transition (1.5s)
+                self.after(0, lambda l=lane: self.signal_dots[l].configure(
+                    text="🟡 YELLOW", text_color=ACCENT_YELLOW))
+                time.sleep(1.5)
+
+    # ── Frame Polling (Tkinter main-thread) ────────────────────
+    def _poll_frames(self):
+        if not self.running:
+            return
+        for lane, cap in self.caps.items():
+            if cap is None or not cap.isOpened():
+                continue
+            if lane == self.active_lane:
+                ret, frame = cap.read()
+                if not ret:
+                    # Loop video
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ret, frame = cap.read()
+                if ret:
+                    self._show_frame(lane, frame)
+            # else: lane is RED — we just don't advance the video
+        self.after(33, self._poll_frames)  # ~30 fps tick
+
+    def _show_frame(self, lane: str, frame: np.ndarray):
+        lbl = self.video_labels[lane]
+        w = max(lbl.winfo_width(), 320)
+        h = max(lbl.winfo_height(), 240)
+        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        img.thumbnail((w, h))
+        ctk_img = ctk.CTkImage(img, size=img.size)
+        lbl.configure(image=ctk_img, text="")
+        lbl.image = ctk_img   # keep ref
+
+
 class SmartTrafficApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -609,6 +887,10 @@ class SmartTrafficApp(ctk.CTk):
     def show_results_screen(self, results):
         self.clear()
         ResultsScreen(self.container, self).grid(row=0, column=0, sticky="nsew")
+
+    def show_intersection_screen(self):
+        self.clear()
+        IntersectionScreen(self.container, self).grid(row=0, column=0, sticky="nsew")
 
     def clear(self):
         for w in self.container.winfo_children(): w.destroy()
