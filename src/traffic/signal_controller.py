@@ -8,6 +8,7 @@ class SignalController:
     
     def __init__(self, config: dict):
         """Initialize controller with timing and starvation settings."""
+        self.config = config
         timing_config = config.get("signal_timing", {})
         self.yellow_time = timing_config.get("yellow_time", 3)
         self.all_red_time = timing_config.get("all_red_time", 2)

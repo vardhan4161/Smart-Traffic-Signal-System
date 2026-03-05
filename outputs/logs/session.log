@@ -2,3 +2,16 @@
 2026-03-05 18:28:56.318 | INFO     | src.logging.session_logger:log_cycle:55 - Logged cycle 1 with 4 lanes.
 2026-03-05 18:28:56.321 | INFO     | src.logging.session_logger:save_csv:64 - Session data saved to outputs/logs\demo_session.csv
 2026-03-05 18:28:58.461 | INFO     | src.visualization.results_plotter:plot_signal_timing_comparison:38 - Signal timing comparison chart saved to outputs/charts/demo_comparison.png
+2026-03-05 18:32:36.557 | INFO     | src.detector.vehicle_detector:__init__:21 - VehicleDetector initialized with yolov8n.pt
+2026-03-05 18:32:36.557 | INFO     | src.traffic.intersection_simulator:__init__:27 - IntersectionSimulator initialized.
+2026-03-05 18:32:36.557 | INFO     | src.traffic.intersection_simulator:run_from_counts:65 - Starting simulation from provided counts.
+2026-03-05 18:32:36.560 | INFO     | src.traffic.intersection_simulator:run_from_counts:65 - Starting simulation from provided counts.
+2026-03-05 18:32:36.563 | INFO     | src.traffic.intersection_simulator:run_from_counts:65 - Starting simulation from provided counts.
+2026-03-05 18:32:36.563 | INFO     | src.traffic.signal_controller:compute_signal_plan:40 - Priority boost applied to North lane (Starved for 2 cycles)
+2026-03-05 18:32:36.563 | INFO     | src.traffic.signal_controller:compute_signal_plan:40 - Priority boost applied to South lane (Starved for 2 cycles)
+2026-03-05 18:32:36.563 | INFO     | src.traffic.signal_controller:compute_signal_plan:40 - Priority boost applied to East lane (Starved for 2 cycles)
+2026-03-05 18:32:36.563 | INFO     | src.traffic.signal_controller:compute_signal_plan:40 - Priority boost applied to West lane (Starved for 2 cycles)
+2026-03-05 18:32:36.827 | INFO     | src.visualization.results_plotter:plot_three_scenario_comparison:111 - Performance report chart saved to outputs/charts\three_scenario_comparison.png
+2026-03-05 18:32:36.976 | INFO     | src.visualization.results_plotter:plot_signal_timing_comparison:38 - Signal timing comparison chart saved to outputs/charts\signal_timing_comparison.png
+2026-03-05 18:32:36.978 | INFO     | src.logging.session_logger:log_cycle:55 - Logged cycle 3 with 4 lanes.
+2026-03-05 18:32:36.980 | INFO     | src.logging.session_logger:save_csv:64 - Session data saved to outputs/logs\demo_session.csv
