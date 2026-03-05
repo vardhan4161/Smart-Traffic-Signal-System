@@ -24,12 +24,51 @@ def cli():
 @cli.command()
 @click.option("--video", required=True, help="Path to video file")
 def detect(video):
-    """Run vehicle detection on a video file."""
+    """Run vehicle detection with tracking on a video file."""
     config = load_config()
+    from src.detector.vehicle_detector import VehicleDetector
+    from src.traffic.density_calculator import DensityCalculator
+    
     detector = VehicleDetector(config)
-    console.print(f"[bold cyan]Running detection on:[/] {video}")
-    detections = detector.detect_video(video)
-    console.print(f"[bold green]Complete![/] Total frames processed: {len(detections)}")
+    calc = DensityCalculator(config)
+    
+    console.print(f"[bold cyan]🔍 Analyzing Traffic Video:[/] {os.path.basename(video)}")
+    
+    with console.status("[bold yellow]Inference + Tracking...[/]") as status:
+        results = detector.process_video(video)
+        
+    # Display Results Table
+    table = Table(title=f"Detection Report — {os.path.basename(video)}")
+    table.add_column("Vehicle", style="cyan")
+    table.add_column("Count", justify="center", style="green")
+    table.add_column("Density Weight", justify="right", style="magenta")
+    
+    counts = results["counts"]
+    weights = config.get("vehicle_weights", {})
+    total_density = 0.0
+    
+    emojis = {"car": "🚗", "motorcycle": "🏍️", "bus": "🚌", "truck": "🚛"}
+    
+    for cls in ["car", "motorcycle", "bus", "truck"]:
+        count = counts.get(cls, 0)
+        weight = weights.get(cls, 1.0)
+        d_val = count * weight
+        total_density += d_val
+        table.add_row(f"{emojis.get(cls, '🚙')} {cls.capitalize()}s", str(count), f"{d_val:.1f}")
+        
+    table.add_section()
+    level = calc.classify_density_level(total_density)
+    table.add_row("[bold]TOTAL[/]", f"[bold]{results['total']}[/]", f"[bold]{total_density:.1f} ({level})[/]")
+    
+    console.print(table)
+    
+    # Timing info
+    green_time = calc.calculate_green_time(total_density)
+    fixed_time = config.get("simulation", {}).get("default_fixed_timer", 30)
+    diff = green_time - fixed_time
+    diff_str = f"+{diff:.1f}s" if diff >= 0 else f"{diff:.1f}s"
+    
+    console.print(f"[bold yellow]Assigned Green Time:[/] {green_time}s  (vs Fixed {fixed_time}s: {diff_str})")
 
 @cli.command()
 @click.option("--mode", type=click.Choice(["counts", "video"]), default="counts")
