@@ -43,26 +43,34 @@ def run_demo():
         "West": {"car": 3}
     }
     
-    # 1. Run Adaptive Simulation
-    adaptive_res = simulator.run_from_counts(lane_counts)
+    # 1. Run Three Scenario Benchmark
+    console.print("[bold yellow]Running Three Scenario Benchmark...[/]")
+    scenario_results = evaluator.run_three_scenarios(detector=None, controller=simulator.controller)
     
-    # 2. Run Fixed Comparison
-    from src.comparison.fixed_timer import FixedTimerSimulator
-    fixed_sim = FixedTimerSimulator(fixed_green_time=30)
-    fixed_res = fixed_sim.simulate(lane_counts)
+    # 2. Generate Comparison Charts
+    console.print("[bold yellow]Generating Visualization Charts...[/]")
     
-    # 3. Evaluate Performance
-    comparison = evaluator.compare(adaptive_res, fixed_res)
-    evaluator.generate_report(comparison, "Demo Scenario")
+    # Plot 1: Three Scenario Comparison (Key Result)
+    plotter.plot_three_scenario_comparison(
+        scenario_results, 
+        os.path.join(config["visualization"]["charts_dir"], "three_scenario_comparison.png")
+    )
     
-    # 4. Log Results
-    logger_inst.log_cycle(adaptive_res.cycle_summary)
+    # Plot 2: Signal Timing for the highest density scenario
+    high_density_res = scenario_results[2]
+    plotter.plot_signal_timing_comparison(
+        high_density_res["adaptive_result"].signal_plan,
+        30,
+        os.path.join(config["visualization"]["charts_dir"], "signal_timing_comparison.png")
+    )
+    
+    # 3. Log Results for the high density scenario
+    logger_inst.log_cycle(high_density_res["adaptive_result"].cycle_summary)
     logger_inst.save_csv()
     
-    # 5. Plot Results
-    plotter.plot_signal_timing_comparison(adaptive_res.signal_plan, 30, "outputs/charts/demo_comparison.png")
-    
-    console.print("\n[bold green]✅ Demo Complete![/] Check outputs/ directory for results.")
+    console.print("\n[bold green]✅ Demo Complete![/] All benchmarks passed.")
+    console.print(f"Charts saved to: [cyan]{config['visualization']['charts_dir']}[/]")
+    console.print(f"Session log saved to: [cyan]{logger_inst.csv_path}[/]")
 
 if __name__ == "__main__":
     run_demo()

@@ -1,0 +1,4 @@
+2026-03-05 18:28:56.312 | INFO     | src.traffic.intersection_simulator:run_from_counts:65 - Starting simulation from provided counts.
+2026-03-05 18:28:56.318 | INFO     | src.logging.session_logger:log_cycle:55 - Logged cycle 1 with 4 lanes.
+2026-03-05 18:28:56.321 | INFO     | src.logging.session_logger:save_csv:64 - Session data saved to outputs/logs\demo_session.csv
+2026-03-05 18:28:58.461 | INFO     | src.visualization.results_plotter:plot_signal_timing_comparison:38 - Signal timing comparison chart saved to outputs/charts/demo_comparison.png
