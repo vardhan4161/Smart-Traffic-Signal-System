@@ -283,9 +283,18 @@ class ProcessingScreen(FadeFrame):
         self.dens_lvl = ctk.CTkLabel(dm_card, text="LOW", font=("Segoe UI", 12, "bold"), text_color=ACCENT_GREEN)
         self.dens_lvl.pack(pady=(0, 10))
 
-        # Log
-        self.log_area = ctk.CTkTextbox(right, fg_color=BG_SECONDARY, border_width=1, border_color=BORDER_COLOR, font=("Consolas", 10), height=200)
-        self.log_area.pack(fill="both", expand=True)
+        # Signal Timing Card
+        sig_card = ctk.CTkFrame(right, fg_color=BG_SECONDARY, corner_radius=12, border_width=1, border_color=BORDER_COLOR)
+        sig_card.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(sig_card, text="Assigned Green Time", font=("Segoe UI", 12, "bold")).pack(pady=(15, 0))
+        self.green_time_lbl = ctk.CTkLabel(sig_card, text="-- s", font=("Consolas", 28, "bold"), text_color=ACCENT_GREEN)
+        self.green_time_lbl.pack()
+        self.signal_cmp_lbl = ctk.CTkLabel(sig_card, text="vs Fixed: 30s", font=("Segoe UI", 11), text_color=TEXT_MUTED)
+        self.signal_cmp_lbl.pack(pady=(0, 10))
+
+        # Log (fixed height — doesn't steal space from stat cards)
+        self.log_area = ctk.CTkTextbox(right, fg_color=BG_SECONDARY, border_width=1, border_color=BORDER_COLOR, font=("Consolas", 10), height=130)
+        self.log_area.pack(fill="x")
 
     def log(self, msg):
         now = datetime.now().strftime("%H:%M:%S")
@@ -453,6 +462,19 @@ class ProcessingScreen(FadeFrame):
         self.dens_num.configure(text_color=color)
         lvl = "LOW" if d < 10 else "MEDIUM" if d < 25 else "HIGH" if d < 40 else "CRITICAL"
         self.dens_lvl.configure(text=lvl, text_color=color)
+
+        # Update Signal Timing
+        try:
+            from src.traffic.density_calculator import DensityCalculator
+            calc = DensityCalculator(self.app_state.settings)
+            green_time = calc.calculate_green_time(d)
+            fixed = self.app_state.settings.get("simulation", {}).get("default_fixed_timer", 30)
+            diff = green_time - fixed
+            diff_str = f"+{diff:.1f}s" if diff >= 0 else f"{diff:.1f}s"
+            self.green_time_lbl.configure(text=f"{green_time:.0f} s", text_color=color)
+            self.signal_cmp_lbl.configure(text=f"vs Fixed {fixed}s: [{diff_str}]")
+        except Exception:
+            pass
 
 class ResultsScreen(FadeFrame):
     def __init__(self, parent, controller):
