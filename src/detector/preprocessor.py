@@ -40,8 +40,9 @@ class Preprocessor:
 
     def is_dark_frame(self, frame: np.ndarray) -> bool:
         """Detect if frame needs night enhancement."""
+        # Use mean brightness of gray frame
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        return gray.mean() < 60
+        return float(gray.mean()) < 80
 
     def night_enhance(self, frame: np.ndarray) -> np.ndarray:
         """Gamma correction for dark footage before CLAHE."""
