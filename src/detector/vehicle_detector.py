@@ -348,7 +348,11 @@ class VehicleDetector:
 
     def annotate(self, frame: np.ndarray, detections):
         """Redundant but kept for GUI code compatibility."""
-        return self._annotate_frame(frame, detections, self.all_seen_ids)
+        # Convert all_seen_ids (dict of sets) to counts (dict of ints)
+        unique_counts = {cls: len(ids) for cls, ids in self.all_seen_ids.items()}
+        for cls in ["car", "motorcycle", "bus", "truck"]:
+            unique_counts.setdefault(cls, 0)
+        return self._annotate_frame(frame, detections, unique_counts)
 
     def count_vehicles(self, detections):
         """Redundant but kept for GUI code compatibility."""

@@ -28,3 +28,13 @@
 2026-03-05 18:33:04.888 | INFO     | src.visualization.results_plotter:plot_signal_timing_comparison:38 - Signal timing comparison chart saved to outputs/charts\signal_timing_comparison.png
 2026-03-05 18:33:04.889 | INFO     | src.logging.session_logger:log_cycle:55 - Logged cycle 3 with 4 lanes.
 2026-03-05 18:33:04.892 | INFO     | src.logging.session_logger:save_csv:64 - Session data saved to outputs/logs\demo_session.csv
+2026-03-05 19:39:13.649 | INFO     | src.detector.vehicle_detector:_load_model:77 - Loaded model: yolov8s.pt
+2026-03-05 19:39:13.650 | INFO     | src.detector.vehicle_detector:__init__:69 - VehicleDetector ready | conf=0.25 | tracking=True
+2026-03-05 19:40:20.398 | INFO     | src.detector.vehicle_detector:_load_model:77 - Loaded model: yolov8s.pt
+2026-03-05 19:40:20.399 | INFO     | src.detector.vehicle_detector:__init__:69 - VehicleDetector ready | conf=0.25 | tracking=True
+2026-03-05 19:42:17.527 | INFO     | src.detector.vehicle_detector:_load_model:77 - Loaded model: yolov8s.pt
+2026-03-05 19:42:17.527 | INFO     | src.detector.vehicle_detector:__init__:69 - VehicleDetector ready | conf=0.25 | tracking=True
+2026-03-05 19:52:22.492 | INFO     | src.detector.vehicle_detector:_load_model:77 - Loaded model: yolov8s.pt
+2026-03-05 19:52:22.493 | INFO     | src.detector.vehicle_detector:__init__:69 - VehicleDetector ready | conf=0.25 | tracking=True
+2026-03-05 19:52:53.222 | INFO     | src.detector.vehicle_detector:_load_model:77 - Loaded model: yolov8s.pt
+2026-03-05 19:52:53.226 | INFO     | src.detector.vehicle_detector:__init__:69 - VehicleDetector ready | conf=0.25 | tracking=True
