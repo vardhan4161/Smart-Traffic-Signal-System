@@ -34,11 +34,12 @@ class VehicleDetector:
     Counts UNIQUE vehicles using track IDs, not raw per-frame detections.
     """
 
-    # COCO class IDs for vehicles
-    VEHICLE_CLASSES = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
+    # COCO class IDs for vehicles + pedestrians
+    VEHICLE_CLASSES = {0: "person", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
 
     # Colors per class for bounding boxes (BGR)
     CLASS_COLORS = {
+        "person":     (255, 0, 255),   # Magenta
         "car":        (0, 255, 0),     # Green
         "motorcycle": (0, 255, 255),   # Cyan
         "bus":        (0, 0, 255),     # Red

@@ -22,8 +22,10 @@ from loguru import logger
 # We assume the project root is in PYTHONPATH
 from src.detector.vehicle_detector import VehicleDetector
 from src.detector.preprocessor import Preprocessor
+from src.detector.audio_processor import SirenDetector
 from src.traffic.density_calculator import DensityCalculator
 from src.traffic.signal_controller import SignalController
+from src.traffic.rl_agent import TrafficRLAgent
 from src.comparison.fixed_timer import FixedTimerSimulator
 from src.comparison.performance_evaluator import PerformanceEvaluator
 from src.logging.session_logger import SessionLogger
@@ -628,6 +630,11 @@ class IntersectionScreen(FadeFrame):
         self.running = False
         self.cycle_thread = None
         self._stop_evt = threading.Event()
+        
+        # New Smart City Features
+        self.siren_active = False
+        self.siren_detector = SirenDetector(callback=self._on_siren_change)
+        self.rl_agents = {l: TrafficRLAgent(l) for l in self.LANES}
 
         # Build UI
         self._build_header()
@@ -644,10 +651,18 @@ class IntersectionScreen(FadeFrame):
         hdr.pack(fill="x")
         ctk.CTkLabel(hdr, text="🔴🟢  4-Lane Intersection Monitor",
                      font=("Segoe UI", 18, "bold")).pack(side="left", padx=20, pady=10)
+        
+        # Siren HUD
+        self.siren_hud = ctk.CTkLabel(hdr, text="📢 NO SIRENS",
+                                      font=("Segoe UI", 12, "bold"),
+                                      fg_color=BG_TERTIARY, corner_radius=6,
+                                      width=120, height=30)
+        self.siren_hud.pack(side="left", padx=30)
+
         ctk.CTkButton(hdr, text="✕ Back", width=80,
                       fg_color=BG_TERTIARY, hover_color=BORDER_COLOR,
                       command=self._go_home).pack(side="right", padx=20, pady=12)
-        ctk.CTkLabel(hdr, text="Green lane plays · Red lane pauses · Adaptive cycle",
+        ctk.CTkLabel(hdr, text="Adaptive · Siren-Priority · RL-Optimized",
                      font=("Segoe UI", 11), text_color=TEXT_MUTED).pack(side="right", padx=5)
 
     def _build_grid(self):
@@ -730,6 +745,11 @@ class IntersectionScreen(FadeFrame):
                                    fg_color=ACCENT_BLUE, hover_color="#3a86d9")
         demo_cb.pack(side="left", padx=20)
 
+        self.rl_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(foot, text="🧠 AI Learning Mode (RL)", 
+                         variable=self.rl_var, font=("Segoe UI", 12, "bold"),
+                         fg_color=ACCENT_GREEN, hover_color="#2e9040").pack(side="left", padx=10)
+
         self.cycle_lbl = ctk.CTkLabel(
             foot, text="Cycle: -  |  Active: -  |  Green time: -",
             font=("Segoe UI", 12), text_color=TEXT_MUTED)
@@ -780,12 +800,17 @@ class IntersectionScreen(FadeFrame):
         self.cycle_thread = threading.Thread(target=self._cycle_loop, daemon=True)
         self.cycle_thread.start()
 
+        # Start siren detector
+        self.siren_detector.start()
+
         # Start frame polling
         self._poll_frames()
 
     def _stop(self):
         self.running = False
         self._stop_evt.set()
+        self.siren_detector.stop()
+        
         for cap in self.caps.values():
             if cap:
                 cap.release()
@@ -805,6 +830,18 @@ class IntersectionScreen(FadeFrame):
         else:
             self.signal_dots[lane].configure(text="🔴 RED",   text_color=ACCENT_RED)
 
+    def _on_siren_change(self, is_active: bool):
+        """Callback from SirenDetector."""
+        self.siren_active = is_active
+        if is_active:
+            self.after(0, lambda: (
+                self.siren_hud.configure(text="🚨 SIREN DETECTED!", fg_color=ACCENT_RED, text_color="white"),
+                logger.warning("SIREN AUDIBLE - Preparing for emergency priority")
+            ))
+        else:
+            self.after(0, lambda: self.siren_hud.configure(
+                text="📢 NO SIRENS", fg_color=BG_TERTIARY, text_color=TEXT_MUTED))
+
     # ── Signal Cycle Thread ─────────────────────────────────────
     def _cycle_loop(self):
         """Runs in a background thread. Decides which lane gets green."""
@@ -820,10 +857,16 @@ class IntersectionScreen(FadeFrame):
         while not self._stop_evt.is_set():
             cycle_num += 1
 
-            # Use current densities (updated by _poll_frames via vehicle counting)
-            plan = sig_ctrl.compute_signal_plan({
-                l: self.densities.get(l, 0.0) for l in loaded_lanes
-            })
+            # Check if siren is active - if so, boost the most congested or just flag it
+            # We'll inject a HUGE density into all lanes if siren is active but no visual contact
+            # Or better, just let SignalController handle the 'emergency' override
+            
+            densities = {l: self.densities.get(l, 0.0) for l in loaded_lanes}
+            if self.siren_active:
+                # If siren heard but not seen, give all lanes priority boost in controller
+                for l in densities: densities[l] += 20.0
+            
+            plan = sig_ctrl.compute_signal_plan(densities, lane_counts=getattr(self, "lane_counts_cache", {}))
             order = sig_ctrl.priority_order(plan)
 
             for lane in order:
@@ -831,16 +874,29 @@ class IntersectionScreen(FadeFrame):
                     return
 
                 green_time = plan[lane]["green_time"]
+                is_emergency = plan[lane].get("emergency", False)
+                
+                # Apply RL adjustment if enabled
+                prev_state, served_action = None, None
+                if self.rl_var.get() and not is_emergency:
+                    agent = self.rl_agents[lane]
+                    state = plan[lane]["density_level"]
+                    adjustment = agent.get_action(state)
+                    green_time = max(sig_ctrl.calculator.t_min, green_time + adjustment)
+                    prev_state, served_action = state, adjustment
+
                 self.active_lane = lane
 
                 # Update UI signals
-                self.after(0, lambda l=lane, gt=green_time, c=cycle_num: (
+                self.after(0, lambda l=lane, gt=green_time, c=cycle_num, em=is_emergency: (
                     [self._set_signal(ll, ll == l) for ll in loaded_lanes],
+                    self.signal_dots[l].configure(text="🚨 EMERGENCY" if em else "🟢 GREEN", 
+                                                 text_color=ACCENT_RED if em else ACCENT_GREEN),
                     self.cycle_lbl.configure(
-                        text=f"Cycle: {c}  |  Active: {l}  |  Green time: {gt:.0f}s"),
+                        text=f"Cycle: {c}  |  Active: {l}  |  Green time: {gt:.0f}s" + (" | EMERGENCY!!" if em else "")),
                     self.green_time_labels[l].configure(text=f"Green: {gt:.0f}s")))
 
-                # Sleep for green_time + yellow flash
+                # Sleep for green_time
                 elapsed = 0.0
                 while elapsed < green_time and not self._stop_evt.is_set():
                     time.sleep(0.1)
@@ -850,6 +906,19 @@ class IntersectionScreen(FadeFrame):
                 self.after(0, lambda l=lane: self.signal_dots[l].configure(
                     text="🟡 YELLOW", text_color=ACCENT_YELLOW))
                 time.sleep(1.5)
+
+                # RL Reward Update
+                if self.rl_var.get() and prev_state and served_action:
+                    # Calculate reward: Improvement in density
+                    final_density = self.densities.get(lane, 0.0)
+                    reward = (plan[lane]["density"] - final_density) * 10
+                    next_state = sig_ctrl.calculator.classify_density_level(final_density)
+                    self.rl_agents[lane].update(prev_state, served_action, reward, next_state)
+                    logger.info(f"RL Update [{lane}]: State={prev_state}, Reward={reward:.1f}")
+
+                self.after(0, lambda l=lane: self._set_signal(l, False))
+                self.active_lane = None
+                time.sleep(0.5)
 
     # ── Frame Polling (Tkinter main-thread) ────────────────────
     def _poll_frames(self):
@@ -890,6 +959,8 @@ class IntersectionScreen(FadeFrame):
         
         # Draw some "cars" (random moving boxes)
         t = time.time() * 2
+        lane_counts = {"car": 0, "person": 0}
+        
         for i in range(5):
             y_pos = int((t * 100 + i * 150) % 600) - 100
             x_pos = 180 if i % 2 == 0 else 400
@@ -897,6 +968,29 @@ class IntersectionScreen(FadeFrame):
             cv2.rectangle(frame, (x_pos, y_pos), (x_pos+60, y_pos+100), color, -1)
             cv2.putText(frame, "ID:"+str(100+i), (x_pos, y_pos-5), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            lane_counts["car"] += 1
+            
+        # Add a pedestrian periodically
+        if int(t) % 10 < 3:
+            cv2.circle(frame, (100, 300), 15, (255, 0, 255), -1)
+            cv2.putText(frame, "Pedestrian", (70, 280), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 100, 255), 1)
+            lane_counts["person"] = 1
+            
+        # Add an ambulance (white truck) rarely
+        if int(t) % 60 < 2:
+            cv2.rectangle(frame, (450, 200), (520, 320), (255, 255, 255), -1)
+            cv2.putText(frame, "AMBULANCE", (440, 190), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            # Signal the lane as high density to trigger priority
+            lane_counts["truck"] = 20 # Artificial boost
+
+        # Store simulated counts/densities for the cycle loop
+        from src.traffic.density_calculator import DensityCalculator
+        calc = DensityCalculator(self.app_state.settings)
+        self.densities[lane] = calc.calculate_weighted_density(lane_counts)
+        # We need a way to pass lane_counts to SignalController. 
+        # I'll store it as an attribute.
+        if not hasattr(self, "lane_counts_cache"): self.lane_counts_cache = {}
+        self.lane_counts_cache[lane] = lane_counts
 
         return frame
 

@@ -9,6 +9,7 @@ class DensityCalculator:
         timing_config = config.get("signal_timing", {})
         self.t_min = timing_config.get("t_min", 10)
         self.t_max = timing_config.get("t_max", 90)
+        self.t_pedestrian = timing_config.get("t_pedestrian", 15)
         self.k_factor = timing_config.get("k_factor", 1.5)
 
     def calculate(self, vehicle_counts: dict) -> float:
@@ -23,10 +24,15 @@ class DensityCalculator:
             density += count * weight
         return density
 
-    def calculate_green_time(self, density: float) -> float:
+    def calculate_green_time(self, density: float, has_pedestrians: bool = False) -> float:
         """Assign green signal time using the intelligent formula."""
         # Formula: Tg = clamp(T_min + density * k_factor, T_min, T_max)
         tg = self.t_min + (density * self.k_factor)
+        
+        # Enforce pedestrian safety minimum if pedestrians are present
+        if has_pedestrians:
+            tg = max(tg, self.t_pedestrian)
+            
         tg = max(self.t_min, min(tg, self.t_max))
         return round(float(tg), 1)
 

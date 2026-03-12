@@ -19,51 +19,71 @@ class SignalController:
         self.starvation_counter = {lane: 0 for lane in config.get("simulation", {}).get("lane_names", [])}
         self.cycle_count = 0
 
-    def compute_signal_plan(self, lane_densities: Dict[str, float]) -> Dict[str, Any]:
+    def compute_signal_plan(self, lane_densities: Dict[str, float], lane_counts: Dict[str, Dict[str, int]] = None) -> Dict[str, Any]:
         """Generate an adaptive signal plan for all lanes."""
         self.cycle_count += 1
         signal_plan = {}
+        lane_counts = lane_counts or {}
         
-        # Determine serving order (highest green time/density first)
-        # Note: We calculate times first to decide order, then apply boost logic
+        # Check for Emergency Vehicle Priority (EVP)
+        emergency_override_enabled = self.config.get("signal_timing", {}).get("emergency_override", True)
+        emergency_lane = None
         
+        if emergency_override_enabled:
+            # Check if any lane has an emergency vehicle (based on very high density or count)
+            # Threshold matches config weight (50.0)
+            for lane, density in lane_densities.items():
+                if density >= 50.0: 
+                    emergency_lane = lane
+                    logger.warning(f"EMERGENCY VEHICLE DETECTED in {lane} lane! Triggering override.")
+                    break
+
         boosted_lanes = []
         for lane, density in lane_densities.items():
             current_density = density
             is_boosted = False
             
-            # Apply starvation boost
+            # 1. Handle Emergency Override
+            if emergency_lane == lane:
+                # Emergency vehicles get max time or at least priority 1
+                green_time = self.calculator.t_max
+                signal_plan[lane] = {
+                    "green_time": green_time,
+                    "density": density,
+                    "density_level": "EMERGENCY",
+                    "boosted": True,
+                    "emergency": True
+                }
+                continue
+
+            # 2. Apply starvation boost
             if self.starvation_counter.get(lane, 0) >= self.starvation_threshold:
                 current_density *= self.priority_multiplier
                 is_boosted = True
                 boosted_lanes.append(lane)
                 logger.info(f"Priority boost applied to {lane} lane (Starved for {self.starvation_counter[lane]} cycles)")
             
-            green_time = self.calculator.calculate_green_time(current_density)
+            # 3. Check for pedestrians
+            counts = lane_counts.get(lane, {})
+            has_pedestrians = counts.get("person", 0) > 0
+            
+            green_time = self.calculator.calculate_green_time(current_density, has_pedestrians=has_pedestrians)
             density_level = self.calculator.classify_density_level(density)
             
             signal_plan[lane] = {
                 "green_time": green_time,
                 "density": density,
                 "density_level": density_level,
-                "boosted": is_boosted
+                "boosted": is_boosted,
+                "emergency": False,
+                "has_pedestrians": has_pedestrians
             }
 
         # Update starvation counters
-        # For now, we assume all lanes are served in a cycle in priority order.
-        # In a real system, some might be skipped or served briefly.
-        # Here, we reset counters for boosted lanes or lanes with significant traffic served.
-        # However, for the simulation requested, we'll increment for lanes NOT currently being "prioritized" 
-        # but since all are served in one cycle, we reset the ones that were boosted.
         for lane in self.starvation_counter:
-            if lane in boosted_lanes:
+            if lane in boosted_lanes or lane == emergency_lane:
                 self.starvation_counter[lane] = 0
             else:
-                # If a lane didn't get boosted, increment its counter if it has waiting traffic or just increment
-                # Actually, the requirement says "increment for non-active lanes". 
-                # In our 4-way simulation, lanes are served sequentially. 
-                # Let's say we serve North, South, East, West.
-                # If West has low traffic it might get a low time.
                 self.starvation_counter[lane] += 1
                 
         return signal_plan

@@ -15,3 +15,5 @@ rich>=13.0.0
 customtkinter>=5.2.0
 lapx>=0.5.5
 filterpy>=1.4.5
+sounddevice>=0.4.6
+scipy>=1.10.0

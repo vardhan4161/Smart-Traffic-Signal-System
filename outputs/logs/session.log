@@ -38,3 +38,16 @@
 2026-03-05 19:52:22.493 | INFO     | src.detector.vehicle_detector:__init__:69 - VehicleDetector ready | conf=0.25 | tracking=True
 2026-03-05 19:52:53.222 | INFO     | src.detector.vehicle_detector:_load_model:77 - Loaded model: yolov8s.pt
 2026-03-05 19:52:53.226 | INFO     | src.detector.vehicle_detector:__init__:69 - VehicleDetector ready | conf=0.25 | tracking=True
+2026-03-05 20:18:38.289 | INFO     | src.detector.vehicle_detector:_load_model:77 - Loaded model: yolov8s.pt
+2026-03-05 20:18:38.290 | INFO     | src.detector.vehicle_detector:__init__:69 - VehicleDetector ready | conf=0.25 | tracking=True
+2026-03-05 20:18:38.314 | INFO     | src.detector.vehicle_detector:process_video:257 - Processing 377 frames from D:\Prj\Trafic_Optimesr\north.mp4
+2026-03-05 20:18:56.765 | INFO     | src.detector.vehicle_detector:process_video:293 - Final counts: {'car': 3, 'motorcycle': 0, 'bus': 0, 'truck': 0} | Total: 3
+2026-03-05 20:18:56.780 | INFO     | src.detector.vehicle_detector:process_video:257 - Processing 647 frames from D:\Prj\Trafic_Optimesr\south.mp4
+2026-03-05 20:19:35.525 | INFO     | src.detector.vehicle_detector:process_video:293 - Final counts: {'car': 3, 'motorcycle': 0, 'bus': 0, 'truck': 0} | Total: 3
+2026-03-05 20:19:35.539 | INFO     | src.detector.vehicle_detector:process_video:257 - Processing 377 frames from D:\Prj\Trafic_Optimesr\east.mp4
+2026-03-05 20:19:55.399 | INFO     | src.detector.vehicle_detector:process_video:293 - Final counts: {'car': 3, 'motorcycle': 0, 'bus': 0, 'truck': 0} | Total: 3
+2026-03-05 20:19:55.409 | INFO     | src.detector.vehicle_detector:process_video:257 - Processing 647 frames from D:\Prj\Trafic_Optimesr\west.mp4
+2026-03-05 20:20:33.127 | INFO     | src.detector.vehicle_detector:process_video:293 - Final counts: {'car': 3, 'motorcycle': 0, 'bus': 0, 'truck': 0} | Total: 3
+2026-03-05 20:20:33.129 | INFO     | src.traffic.intersection_simulator:run_from_counts:65 - Starting simulation from provided counts.
+2026-03-05 20:20:33.138 | INFO     | src.logging.session_logger:log_cycle:55 - Logged cycle 1 with 4 lanes.
+2026-03-05 20:20:33.141 | INFO     | src.logging.session_logger:save_csv:64 - Session data saved to outputs/logs\session_log.csv
