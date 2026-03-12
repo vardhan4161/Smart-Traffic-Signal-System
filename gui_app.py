@@ -26,6 +26,7 @@ from src.detector.audio_processor import SirenDetector
 from src.traffic.density_calculator import DensityCalculator
 from src.traffic.signal_controller import SignalController
 from src.traffic.rl_agent import TrafficRLAgent
+from src.traffic.top_down_sim import TopDownSimulator
 from src.comparison.fixed_timer import FixedTimerSimulator
 from src.comparison.performance_evaluator import PerformanceEvaluator
 from src.logging.session_logger import SessionLogger
@@ -187,7 +188,19 @@ class HomeScreen(FadeFrame):
             fg_color=ACCENT_BLUE,
             hover_color="#3a86d9",
             command=lambda: controller.show_intersection_screen(demo=True)
-        ).grid(row=0, column=1, padx=(5, 0), sticky="ew")
+        ).grid(row=0, column=1, padx=(5, 5), sticky="ew")
+
+        ctk.CTkButton(
+            btn_lane_grid,
+            text="🗺️  Top-Down Simulator",
+            font=("Segoe UI", 12, "bold"),
+            height=50,
+            fg_color="#8e44ad",
+            hover_color="#732d91",
+            command=controller.show_simulation_screen
+        ).grid(row=0, column=2, padx=(5, 0), sticky="ew")
+
+        btn_lane_grid.grid_columnconfigure((0, 1, 2), weight=1)
 
         self.update_mode()
 
@@ -1005,6 +1018,97 @@ class IntersectionScreen(FadeFrame):
         lbl.image = ctk_img   # keep ref
 
 
+# ─────────────────────────────────────────────────────────────────
+
+
+# ─────────────────────────────────────────────────────────────────
+# SimulationScreen
+# ─────────────────────────────────────────────────────────────────
+class SimulationScreen(FadeFrame):
+    """
+    Top-down graphical simulation using the TopDownSimulator component.
+    """
+    def __init__(self, parent, controller):
+        super().__init__(parent, fg_color=BG_PRIMARY)
+        self.controller = controller
+        self.app_state = controller.app_state
+        
+        self._build_header()
+        
+        # Simulator Widget
+        self.sim = TopDownSimulator(self, self.app_state.settings, signal_callback=self._on_sim_update)
+        self.sim.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Signal Controller for real-time logic
+        from src.traffic.signal_controller import SignalController
+        self.sig_ctrl = SignalController(self.app_state.settings)
+        self.last_plan = None
+        
+        self.running = False
+        self.sim.start()
+        self.running = True
+
+    def _build_header(self):
+        hdr = ctk.CTkFrame(self, fg_color=BG_SECONDARY, height=60)
+        hdr.pack(fill="x")
+        
+        ctk.CTkLabel(hdr, text="🗺️ Graphical Intersection Simulator",
+                     font=("Segoe UI", 18, "bold")).pack(side="left", padx=20, pady=10)
+        
+        ctk.CTkButton(hdr, text="✕ Close", width=80,
+                      fg_color=BG_TERTIARY, hover_color=BORDER_COLOR,
+                      command=self._go_home).pack(side="right", padx=20, pady=12)
+        
+        self.status_lbl = ctk.CTkLabel(hdr, text="Simulating adaptive traffic flow...",
+                                       font=("Segoe UI", 11), text_color=TEXT_MUTED)
+        self.status_lbl.pack(side="right", padx=10)
+
+    def _on_sim_update(self, lane_counts):
+        """Called by simulator to get new signal timings."""
+        # 1. Update density scores based on counts
+        densities = {}
+        for lane, counts in lane_counts.items():
+            densities[lane] = self.sig_ctrl.calculator.calculate_weighted_density(counts)
+            
+        # 2. Get adaptive plan
+        plan = self.sig_ctrl.compute_signal_plan(densities, lane_counts=lane_counts)
+        
+        # 3. Update Simulator lights
+        # Since the simulator loop is fast, we only switch lights when the "active" phase changes
+        # However, for simplicity, we let the controller handle logic and we just follow its lead.
+        # For the top-down sim, we'll use a simpler 'active lane' rotation logic.
+        
+        if not hasattr(self, "current_green"): self.current_green = "North"
+        if not hasattr(self, "timer"): self.timer = 0
+        
+        self.timer += 0.03 # increment based on sim tick
+        
+        # Basic adaptive rotation
+        current_limit = plan[self.current_green]["green_time"]
+        
+        if self.timer >= current_limit:
+            self.timer = 0
+            # Rotate to next lane in priority order from plan
+            order = self.sig_ctrl.priority_order(plan)
+            idx = order.index(self.current_green)
+            self.current_green = order[(idx + 1) % len(order)]
+            logger.info(f"SIM: Switching Green to {self.current_green} (Limit: {plan[self.current_green]['green_time']}s)")
+
+        # Apply to sim
+        for lane in ["North", "South", "East", "West"]:
+            state = "GREEN" if lane == self.current_green else "RED"
+            # Add yellow transition
+            if lane == self.current_green and self.timer > current_limit - 2:
+                state = "YELLOW"
+            self.sim.set_light(lane, state)
+
+        self.status_lbl.configure(text=f"Active: {self.current_green} | Time: {self.timer:.1f}/{current_limit:.0f}s")
+
+    def _go_home(self):
+        self.sim.stop()
+        self.controller.show_home_screen()
+
+
 class SmartTrafficApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -1028,7 +1132,11 @@ class SmartTrafficApp(ctk.CTk):
         try:
             with open("config/settings.yaml", "r") as f:
                 self.app_state.settings = yaml.safe_load(f)
-        except:
+        except FileNotFoundError:
+            logger.warning("settings.yaml not found. Using default empty settings.")
+            self.app_state.settings = {"detection": {}, "signal_timing": {}}
+        except Exception as e:
+            logger.error(f"Error loading settings.yaml: {e}. Using default empty settings.")
             self.app_state.settings = {"detection": {}, "signal_timing": {}}
 
     def show_home_screen(self):
@@ -1047,7 +1155,13 @@ class SmartTrafficApp(ctk.CTk):
 
     def show_intersection_screen(self, demo=False):
         self.clear()
-        IntersectionScreen(self.container, self, start_demo=demo).grid(row=0, column=0, sticky="nsew")
+        f = IntersectionScreen(self.container, self, start_demo=demo)
+        f.grid(row=0, column=0, sticky="nsew")
+
+    def show_simulation_screen(self):
+        self.clear()
+        f = SimulationScreen(self.container, self)
+        f.grid(row=0, column=0, sticky="nsew")
 
     def clear(self):
         for w in self.container.winfo_children(): w.destroy()
