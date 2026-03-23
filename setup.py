@@ -19,5 +19,10 @@ setup(
         "loguru",
         "click",
         "rich",
+        "customtkinter",
+        "lapx",
+        "filterpy",
+        "sounddevice",
+        "scipy",
     ],
 )

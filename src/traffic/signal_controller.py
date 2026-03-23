@@ -10,13 +10,15 @@ class SignalController:
         """Initialize controller with timing and starvation settings."""
         self.config = config
         timing_config = config.get("signal_timing", {})
+        sim_config = config.get("simulation", {})
         self.yellow_time = timing_config.get("yellow_time", 3)
         self.all_red_time = timing_config.get("all_red_time", 2)
         self.starvation_threshold = timing_config.get("starvation_threshold", 2)
         self.priority_multiplier = timing_config.get("priority_multiplier", 1.4)
+        self.default_fixed_timer = sim_config.get("default_fixed_timer", 30)
         
         self.calculator = DensityCalculator(config)
-        self.starvation_counter = {lane: 0 for lane in config.get("simulation", {}).get("lane_names", [])}
+        self.starvation_counter = {lane: 0 for lane in sim_config.get("lane_names", [])}
         self.cycle_count = 0
 
     def compute_signal_plan(self, lane_densities: Dict[str, float], lane_counts: Dict[str, Dict[str, int]] = None) -> Dict[str, Any]:
@@ -24,16 +26,17 @@ class SignalController:
         self.cycle_count += 1
         signal_plan = {}
         lane_counts = lane_counts or {}
+        adjusted_densities = {}
         
         # Check for Emergency Vehicle Priority (EVP)
         emergency_override_enabled = self.config.get("signal_timing", {}).get("emergency_override", True)
         emergency_lane = None
         
         if emergency_override_enabled:
-            # Check if any lane has an emergency vehicle (based on very high density or count)
-            # Threshold matches config weight (50.0)
+            # Emergency override should be explicit, not inferred from normal congestion.
             for lane, density in lane_densities.items():
-                if density >= 50.0: 
+                counts = lane_counts.get(lane, {})
+                if counts.get("emergency", 0) > 0:
                     emergency_lane = lane
                     logger.warning(f"EMERGENCY VEHICLE DETECTED in {lane} lane! Triggering override.")
                     break
@@ -52,7 +55,8 @@ class SignalController:
                     "density": density,
                     "density_level": "EMERGENCY",
                     "boosted": True,
-                    "emergency": True
+                    "emergency": True,
+                    "counts": lane_counts.get(lane, {})
                 }
                 continue
 
@@ -62,21 +66,33 @@ class SignalController:
                 is_boosted = True
                 boosted_lanes.append(lane)
                 logger.info(f"Priority boost applied to {lane} lane (Starved for {self.starvation_counter[lane]} cycles)")
-            
-            # 3. Check for pedestrians
+            adjusted_densities[lane] = current_density
+
+        normal_lanes = [lane for lane in lane_densities if lane != emergency_lane]
+        total_adjusted_density = sum(adjusted_densities.get(lane, 0.0) for lane in normal_lanes)
+        base_min_total = len(normal_lanes) * self.calculator.t_min
+
+        # Keep the adaptive cycle tighter than the fixed baseline, then redistribute
+        # that limited budget toward the busiest lanes.
+        per_lane_budget = self.calculator.t_min + max(0.0, (self.default_fixed_timer - self.calculator.t_min) * 0.5)
+        total_green_budget = max(base_min_total, len(normal_lanes) * per_lane_budget)
+        discretionary_budget = max(0.0, total_green_budget - base_min_total)
+
+        for lane in normal_lanes:
             counts = lane_counts.get(lane, {})
-            has_pedestrians = counts.get("person", 0) > 0
-            
-            green_time = self.calculator.calculate_green_time(current_density, has_pedestrians=has_pedestrians)
+            share = (adjusted_densities.get(lane, 0.0) / total_adjusted_density) if total_adjusted_density > 0 else (1.0 / max(1, len(normal_lanes)))
+            green_time = self.calculator.t_min + (discretionary_budget * share)
+            green_time = round(float(min(green_time, self.calculator.t_max)), 1)
+            density = lane_densities[lane]
             density_level = self.calculator.classify_density_level(density)
-            
+
             signal_plan[lane] = {
                 "green_time": green_time,
                 "density": density,
                 "density_level": density_level,
-                "boosted": is_boosted,
+                "boosted": lane in boosted_lanes,
                 "emergency": False,
-                "has_pedestrians": has_pedestrians
+                "counts": counts
             }
 
         # Update starvation counters

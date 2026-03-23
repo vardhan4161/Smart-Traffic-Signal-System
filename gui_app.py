@@ -972,7 +972,7 @@ class IntersectionScreen(FadeFrame):
         
         # Draw some "cars" (random moving boxes)
         t = time.time() * 2
-        lane_counts = {"car": 0, "person": 0}
+        lane_counts = {"car": 0}
         
         for i in range(5):
             y_pos = int((t * 100 + i * 150) % 600) - 100
@@ -982,12 +982,6 @@ class IntersectionScreen(FadeFrame):
             cv2.putText(frame, "ID:"+str(100+i), (x_pos, y_pos-5), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             lane_counts["car"] += 1
-            
-        # Add a pedestrian periodically
-        if int(t) % 10 < 3:
-            cv2.circle(frame, (100, 300), 15, (255, 0, 255), -1)
-            cv2.putText(frame, "Pedestrian", (70, 280), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 100, 255), 1)
-            lane_counts["person"] = 1
             
         # Add an ambulance (white truck) rarely
         if int(t) % 60 < 2:
@@ -1028,29 +1022,42 @@ class SimulationScreen(FadeFrame):
     """
     Top-down graphical simulation using the TopDownSimulator component.
     """
+    # Round-robin cycle order — all 4 get equal turns
+    CYCLE_ORDER = ["North", "South", "East", "West"]
+
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color=BG_PRIMARY)
         self.controller = controller
         self.app_state = controller.app_state
-        
+
+        self.grid_columnconfigure(0, weight=8)
+        self.grid_columnconfigure(1, weight=2)
+        self.grid_rowconfigure(1, weight=1)
+
         self._build_header()
-        
-        # Simulator Widget
-        self.sim = TopDownSimulator(self, self.app_state.settings, signal_callback=self._on_sim_update)
-        self.sim.pack(fill="both", expand=True, padx=20, pady=20)
-        
-        # Signal Controller for real-time logic
+
+        # Simulator — NO signal_callback needed (we poll directly)
+        self.sim = TopDownSimulator(self, self.app_state.settings)
+        self.sim.grid(row=1, column=0, sticky="nsew", padx=20, pady=20)
+
+        self._build_controls()
+
+        # Signal controller
         from src.traffic.signal_controller import SignalController
         self.sig_ctrl = SignalController(self.app_state.settings)
-        self.last_plan = None
-        
-        self.running = False
+
+        # Signal state machine
+        self._cycle_idx     = 0
+        self.current_green  = self.CYCLE_ORDER[0]
+        self._phase         = "green"   # "green" | "yellow"
+        self._phase_elapsed = 0.0       # seconds elapsed in current phase
+
         self.sim.start()
-        self.running = True
+        self._signal_tick()             # kick off independent signal loop
 
     def _build_header(self):
-        hdr = ctk.CTkFrame(self, fg_color=BG_SECONDARY, height=60)
-        hdr.pack(fill="x")
+        hdr = ctk.CTkFrame(self, fg_color=BG_SECONDARY, height=60, corner_radius=0)
+        hdr.grid(row=0, column=0, columnspan=2, sticky="ew")
         
         ctk.CTkLabel(hdr, text="🗺️ Graphical Intersection Simulator",
                      font=("Segoe UI", 18, "bold")).pack(side="left", padx=20, pady=10)
@@ -1063,51 +1070,164 @@ class SimulationScreen(FadeFrame):
                                        font=("Segoe UI", 11), text_color=TEXT_MUTED)
         self.status_lbl.pack(side="right", padx=10)
 
-    def _on_sim_update(self, lane_counts):
-        """Called by simulator to get new signal timings."""
-        # 1. Update density scores based on counts
-        densities = {}
-        for lane, counts in lane_counts.items():
-            densities[lane] = self.sig_ctrl.calculator.calculate_weighted_density(counts)
-            
-        # 2. Get adaptive plan
-        plan = self.sig_ctrl.compute_signal_plan(densities, lane_counts=lane_counts)
+    def _build_controls(self):
+        ctrl = ctk.CTkFrame(self, fg_color=BG_SECONDARY, corner_radius=12, border_width=1, border_color=BORDER_COLOR)
+        ctrl.grid(row=1, column=1, sticky="nsew", padx=(0, 20), pady=20)
         
-        # 3. Update Simulator lights
-        # Since the simulator loop is fast, we only switch lights when the "active" phase changes
-        # However, for simplicity, we let the controller handle logic and we just follow its lead.
-        # For the top-down sim, we'll use a simpler 'active lane' rotation logic.
+        scroll = ctk.CTkScrollableFrame(ctrl, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=10, pady=10)
         
-        if not hasattr(self, "current_green"): self.current_green = "North"
-        if not hasattr(self, "timer"): self.timer = 0
+        ctk.CTkLabel(scroll, text="🕹️ SIM CONTROLS", font=("Segoe UI", 14, "bold")).pack(pady=(10, 20))
         
-        self.timer += 0.03 # increment based on sim tick
-        
-        # Basic adaptive rotation
-        current_limit = plan[self.current_green]["green_time"]
-        
-        if self.timer >= current_limit:
-            self.timer = 0
-            # Rotate to next lane in priority order from plan
-            order = self.sig_ctrl.priority_order(plan)
-            idx = order.index(self.current_green)
-            self.current_green = order[(idx + 1) % len(order)]
-            logger.info(f"SIM: Switching Green to {self.current_green} (Limit: {plan[self.current_green]['green_time']}s)")
-
-        # Apply to sim
+        # 1. Lane Injection
         for lane in ["North", "South", "East", "West"]:
-            state = "GREEN" if lane == self.current_green else "RED"
-            # Add yellow transition
-            if lane == self.current_green and self.timer > current_limit - 2:
-                state = "YELLOW"
-            self.sim.set_light(lane, state)
+            group = ctk.CTkFrame(scroll, fg_color=BG_TERTIARY, corner_radius=8)
+            group.pack(fill="x", pady=5)
+            ctk.CTkLabel(group, text=f"{lane} Lane", font=("Segoe UI", 12, "bold")).pack(pady=5)
+            
+            btn_row = ctk.CTkFrame(group, fg_color="transparent")
+            btn_row.pack(pady=5)
+            
+            ctk.CTkButton(btn_row, text="🚗", width=40, height=35, command=lambda l=lane: self.sim.spawn_vehicle(l, "car")).pack(side="left", padx=2)
+            ctk.CTkButton(btn_row, text="🚌", width=40, height=35, command=lambda l=lane: self.sim.spawn_vehicle(l, "bus")).pack(side="left", padx=2)
+            ctk.CTkButton(btn_row, text="🚑", width=40, height=35, fg_color=ACCENT_RED, hover_color="#c0392b", 
+                          command=lambda l=lane: self.sim.spawn_vehicle(l, "ambulance")).pack(side="left", padx=2)
 
-        self.status_lbl.configure(text=f"Active: {self.current_green} | Time: {self.timer:.1f}/{current_limit:.0f}s")
+        # 2. Scenario Presets
+        ctk.CTkLabel(scroll, text="🎭 PRESETS", font=("Segoe UI", 13, "bold")).pack(pady=(20, 10))
+        
+        presets = [
+            ("🏙️ Rush Hour", self._preset_rush_hour),
+            ("🌱 Clear Road", self._preset_clear),
+            ("🚨 Emergency Alert", self._preset_emergency)
+        ]
+        
+        for name, cmd in presets:
+            ctk.CTkButton(scroll, text=name, fg_color=BG_TERTIARY, hover_color=BORDER_COLOR, height=40, command=cmd).pack(fill="x", pady=3)
+
+    def _preset_rush_hour(self):
+        logger.info("PRESET: Rush Hour triggered")
+        # Flood all 4 lanes × 2 sub-lanes with vehicles — physics guard handles spacing
+        for _ in range(3):   # 3 passes to fill up queues
+            for lane in ["North", "South", "East", "West"]:
+                for li in [0, 1]:
+                    vt = random.choices(["car","bus","truck"], weights=[70,20,10])[0]
+                    self.sim.spawn_vehicle(lane, vt, li)
+
+    def _preset_clear(self):
+        logger.info("PRESET: Clear Road triggered")
+        self.sim.stop()
+        self.sim.start()
+
+    def _preset_emergency(self):
+        logger.info("PRESET: Emergency Alert triggered")
+        l = random.choice(["North", "South", "East", "West"])
+        self.sim.spawn_vehicle(l, "ambulance")
+        # Flood that lane with congestion
+        for li in [0, 1]:
+            for _ in range(3):
+                self.sim.spawn_vehicle(l, "car", li)
+
+    def _signal_tick(self):
+        """
+        Runs every 1 s, completely independent of the simulator's draw loop.
+
+        FORMULA : green_time = max(20, t_min + density * k_factor)
+        ROTATION : strict N → S → E → W → N …  (density only changes duration)
+        OVERRIDE : ambulance → immediate lane switch
+        """
+        try:
+            calc = self.sig_ctrl.calculator
+            TICK  = 1.0          # seconds per tick
+            YELLOW_DUR = self.sig_ctrl.yellow_time   # typically 3 s
+
+            # 1. Read vehicle counts directly from the simulator
+            lane_counts = {l: self.sim._count_lane(l) for l in self.CYCLE_ORDER}
+            densities   = {l: calc.calculate_weighted_density(c) for l, c in lane_counts.items()}
+            plan        = self.sig_ctrl.compute_signal_plan(densities, lane_counts=lane_counts)
+
+            # 2. Emergency override — jump immediately
+            emerg = next((l for l, p in plan.items() if p.get("emergency")), None)
+            if emerg and emerg != self.current_green:
+                self.current_green  = emerg
+                self._cycle_idx     = self.CYCLE_ORDER.index(emerg)
+                self._phase         = "green"
+                self._phase_elapsed = 0.0
+                logger.warning(f"EVP → {emerg}")
+
+            # 3. Determine green limit for current lane
+            cp          = plan.get(self.current_green, {})
+            green_limit = max(20.0, cp.get("green_time", 20.0))
+            density_val = cp.get("density", 0.0)
+            level       = cp.get("density_level", "LOW")
+
+            # 4. Advance elapsed time
+            self._phase_elapsed += TICK
+
+            # 5. Phase transitions
+            if self._phase == "green" and self._phase_elapsed >= green_limit:
+                self._phase = "yellow"
+                self._phase_elapsed = green_limit   # snap so yellow counts from 0
+
+            if self._phase == "yellow" and self._phase_elapsed >= green_limit + YELLOW_DUR:
+                self._cycle_idx     = (self._cycle_idx + 1) % len(self.CYCLE_ORDER)
+                self.current_green  = self.CYCLE_ORDER[self._cycle_idx]
+                self._phase         = "green"
+                self._phase_elapsed = 0.0
+                next_d = densities.get(self.current_green, 0)
+                next_g = max(20.0, plan.get(self.current_green, {}).get("green_time", 20.0))
+                logger.info(f"SIGNAL → {self.current_green} | green={next_g:.0f}s | density={next_d:.1f}")
+
+            # 6. Apply lights to all 4 arms
+            for lane in self.CYCLE_ORDER:
+                if lane == self.current_green:
+                    state = "YELLOW" if self._phase == "yellow" else "GREEN"
+                else:
+                    state = "RED"
+                self.sim.set_light(lane, state)
+
+            # 7. Build reason & update HUD
+            is_emerg   = cp.get("emergency", False)
+            is_boosted = cp.get("boosted", False)
+            remaining  = max(0, green_limit - self._phase_elapsed)
+
+            if is_emerg:
+                reason = "🚨 EMERGENCY OVERRIDE — ambulance in lane!"
+            elif is_boosted:
+                reason = f"⚡ Starved lane boost | density={density_val:.1f} | {green_limit:.0f}s"
+            else:
+                reason = (
+                    f"📊 {level}: density={density_val:.1f} → "
+                    f"20 + {density_val:.1f}×{calc.k_factor:.1f} = {green_limit:.0f}s"
+                )
+
+            total_v = sum(len(v) for v in self.sim.vehicles.values())
+            per_lane = {l: sum(lane_counts.get(l, {}).values()) for l in self.CYCLE_ORDER}
+
+            if hasattr(self.sim, "update_hud_counts"):
+                self.sim.update_hud_counts(per_lane, self.current_green, reason,
+                                           frame=getattr(self.sim, "_frame", 0),
+                                           total=total_v)
+
+            phase_icon = "🟡" if self._phase == "yellow" else "🟢"
+            elapsed_in_phase = self._phase_elapsed - (green_limit if self._phase == "yellow" else 0)
+            self.status_lbl.configure(
+                text=(
+                    f"{phase_icon} {self.current_green} | "
+                    f"{elapsed_in_phase:.0f}s / {green_limit:.0f}s | "
+                    f"{level} | {total_v} vehicles"
+                )
+            )
+
+        except Exception as e:
+            logger.error(f"[Signal] {e}", exc_info=True)
+
+        # Schedule next tick in 1000 ms
+        self.after(1000, self._signal_tick)
 
     def _go_home(self):
         self.sim.stop()
         self.controller.show_home_screen()
-
 
 class SmartTrafficApp(ctk.CTk):
     def __init__(self):

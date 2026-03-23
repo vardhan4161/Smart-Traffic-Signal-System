@@ -9,7 +9,6 @@ detection:
     motorcycle: 3
     bus: 5
     truck: 7
-    person: 0
 
 tracking:
   enabled: true
@@ -29,14 +28,12 @@ vehicle_weights:                # Density contribution per vehicle type
   motorcycle: 0.5
   bus: 2.5
   truck: 3.0
-  person: 0.8                   # Pedestrian weight
   emergency: 50.0               # Massive weight to trigger immediate green
   unknown: 1.0
 
 signal_timing:
-  t_min: 10                     # Minimum green time in seconds
+  t_min: 20                     # Minimum green time in seconds (base)
   t_max: 90                     # Maximum green time in seconds
-  t_pedestrian: 15              # Minimum green time for pedestrian rounds
   k_factor: 1.5                 # Scaling factor
   yellow_time: 3                # Fixed yellow phase
   all_red_time: 2               # All-red clearance between phases

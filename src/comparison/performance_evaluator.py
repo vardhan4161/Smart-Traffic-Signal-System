@@ -4,6 +4,7 @@ from rich.console import Console
 from rich.table import Table
 from src.comparison.fixed_timer import FixedTimerSimulator
 from src.traffic.intersection_simulator import SimulationResult, IntersectionSimulator
+from src.traffic.signal_controller import SignalController
 
 class PerformanceEvaluator:
     """Evaluates and compares adaptive vs fixed-timer performance."""
@@ -33,6 +34,9 @@ class PerformanceEvaluator:
             a_total_wait += v_count * wait_time
 
         f_total_wait = fixed_result["total_waiting_time"]
+        f_total_vehicles = sum(
+            sum(counts.values()) for counts in fixed_result.get("lane_vehicle_counts", {}).values()
+        )
         
         reduction_pct = 0.0
         if f_total_wait > 0:
@@ -56,7 +60,8 @@ class PerformanceEvaluator:
             "adaptive_cycle_time": a_cycle_time,
             "fixed_cycle_time": fixed_result["total_cycle_time"],
             "efficiency_boost_pct": round(efficiency_boost, 1),
-            "adaptive_avg_wait": round(a_total_wait / a_total_vehicles, 1) if a_total_vehicles > 0 else 0
+            "adaptive_avg_wait": round(a_total_wait / a_total_vehicles, 1) if a_total_vehicles > 0 else 0,
+            "fixed_avg_wait": round(f_total_wait / f_total_vehicles, 1) if f_total_vehicles > 0 else 0,
         }
 
     def generate_report(self, comparison: Dict[str, Any], scenario_name: str = "Traffic Analysis"):
@@ -75,15 +80,19 @@ class PerformanceEvaluator:
         )
         table.add_row(
             "Average Wait per Vehicle",
-            "-", # Not stored explicitly for fixed in comparison but can be derived
+            f"{comparison.get('fixed_avg_wait', 0):.1f}s",
             f"{comparison['adaptive_avg_wait']}s",
             "Significant" if comparison['wait_reduction_pct'] > 20 else "Moderate"
         )
+        cycle_delta_pct = 0.0
+        if comparison["fixed_cycle_time"] > 0:
+            cycle_delta_pct = ((comparison["fixed_cycle_time"] - comparison["adaptive_cycle_time"]) / comparison["fixed_cycle_time"]) * 100
+        cycle_label = f"{abs(cycle_delta_pct):.1f}% faster" if cycle_delta_pct >= 0 else f"{abs(cycle_delta_pct):.1f}% slower"
         table.add_row(
             "Cycle Duration",
             f"{comparison['fixed_cycle_time']}s",
             f"{comparison['adaptive_cycle_time']}s",
-            f"{((comparison['fixed_cycle_time'] - comparison['adaptive_cycle_time']) / comparison['fixed_cycle_time'] * 100):.1f}% faster"
+            cycle_label
         )
         
         self.console.print("\n")
@@ -121,11 +130,12 @@ class PerformanceEvaluator:
             }
         ]
         
-        simulator = IntersectionSimulator(controller.config, detector, controller)
         fixed_sim = FixedTimerSimulator(fixed_green_time=30)
         results = []
         
         for sc in scenarios:
+            fresh_controller = SignalController(controller.config)
+            simulator = IntersectionSimulator(controller.config, detector, fresh_controller)
             adaptive_res = simulator.run_from_counts(sc["counts"])
             fixed_res = fixed_sim.simulate(sc["counts"])
             comp = self.compare(adaptive_res, fixed_res)

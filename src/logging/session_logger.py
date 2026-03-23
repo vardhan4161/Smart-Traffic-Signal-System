@@ -42,7 +42,7 @@ class SessionLogger:
                     "timestamp": timestamp,
                     "cycle_number": cycle_num,
                     "lane_name": lane,
-                    "vehicle_counts_json": json.dumps(data.get("counts", {})), # Assuming counts might be passed back
+                    "vehicle_counts_json": json.dumps(data.get("counts", {})),
                     "weighted_density": data.get("density", 0.0),
                     "density_level": data.get("density_level", "UNKNOWN"),
                     "assigned_green_time": data.get("green_time", 0.0),

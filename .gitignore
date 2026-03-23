@@ -12,6 +12,8 @@ data/videos/*.mp4
 *.pt
 .DS_Store
 .pytest_cache
+.deps/
+.tmp/
 *.egg-info/
 dist/
 build/

@@ -21,7 +21,7 @@ class IntersectionSimulator:
     def __init__(self, config: dict, detector: VehicleDetector = None, controller: SignalController = None):
         """Initialize controller and detector (optional for count-only mode)."""
         self.config = config
-        self.detector = detector or VehicleDetector(config)
+        self.detector = detector
         self.controller = controller or SignalController(config)
         self.calculator = DensityCalculator(config)
         logger.info("IntersectionSimulator initialized.")
@@ -29,27 +29,18 @@ class IntersectionSimulator:
     def run_from_videos(self, lane_video_paths: Dict[str, str]) -> SimulationResult:
         """Run full pipeline using video inputs for each lane."""
         logger.info(f"Starting simulation from videos: {list(lane_video_paths.keys())}")
+        if self.detector is None:
+            self.detector = VehicleDetector(self.config)
         lane_vehicle_counts = {}
         lane_densities = {}
         
         for lane, path in lane_video_paths.items():
-            # In a real scenario, we might process many frames. 
-            # For a single cycle simulation, we aggregate detections.
-            detections_list = self.detector.detect_video(path, lane_id=lane)
-            # Flatten detections or just take a representative set (e.g., average or last frame)
-            # Based on standard traffic ops, we often look at the latest state.
-            # Here, we'll take the max count observed or a representative frame.
-            # For simplicity, let's take the count from the middle frame if available.
-            if not detections_list:
-                counts = {v: 0 for v in self.config["detection"]["target_classes"]}
-            else:
-                mid_idx = len(detections_list) // 2
-                counts = self.detector.count_by_type(detections_list[mid_idx])
-            
+            result = self.detector.process_video(path)
+            counts = result.get("counts", {})
             lane_vehicle_counts[lane] = counts
             lane_densities[lane] = self.calculator.calculate_weighted_density(counts)
 
-        signal_plan = self.controller.compute_signal_plan(lane_densities)
+        signal_plan = self.controller.compute_signal_plan(lane_densities, lane_counts=lane_vehicle_counts)
         summary = self.controller.get_cycle_summary(signal_plan)
         
         return SimulationResult(
@@ -67,7 +58,7 @@ class IntersectionSimulator:
         for lane, counts in lane_counts.items():
             lane_densities[lane] = self.calculator.calculate_weighted_density(counts)
             
-        signal_plan = self.controller.compute_signal_plan(lane_densities)
+        signal_plan = self.controller.compute_signal_plan(lane_densities, lane_counts=lane_counts)
         summary = self.controller.get_cycle_summary(signal_plan)
         
         return SimulationResult(

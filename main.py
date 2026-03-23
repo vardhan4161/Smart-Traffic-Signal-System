@@ -178,14 +178,12 @@ def simulate(mode, north, south, east, west):
 def compare():
     """Benchmark adaptive system against fixed-timer across scenarios."""
     config = load_config()
-    detector = VehicleDetector(config)
     evaluator = PerformanceEvaluator()
-    # Mocking controller for quick check
     from src.traffic.signal_controller import SignalController
     controller = SignalController(config)
     
     console.print("[bold yellow]Running Benchmarks...[/]")
-    evaluator.run_three_scenarios(detector, controller)
+    evaluator.run_three_scenarios(None, controller)
 
 @cli.command()
 def dashboard():
